@@ -1,7 +1,0 @@
-streamlit
-yfinance
-pandas
-plotly
-textblob
-numpy
-requests
