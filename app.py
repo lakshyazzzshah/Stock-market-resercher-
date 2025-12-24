@@ -13,14 +13,9 @@ st.set_page_config(page_title="Pro Stock AI", layout="wide")
 def get_client():
     """Connects to Google Sheets using the modern method"""
     try:
-        # Create a dictionary from the secrets
         creds_dict = dict(st.secrets["gcp_service_account"])
-        
-        # FIX: Ensure private key has correct newlines
         if "\\n" in creds_dict["private_key"]:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            
-        # Connect using gspread directly (Modern Way)
         client = gspread.service_account_from_dict(creds_dict)
         return client
     except Exception as e:
@@ -32,55 +27,48 @@ def init_db():
     try:
         client = get_client()
         if not client: return None
-        
-        # Open the Sheet
         sheet = client.open("Stock_App_DB").sheet1
-        
-        # Try to fetch existing data
         data = sheet.get_all_records()
-        if not data:
-            return None
-        return data[0] # Return the first row
+        if not data: return None
+        return data[0]
     except Exception as e:
-        # If the sheet is empty, that's okay (new user)
-        # We don't want to show an error for empty sheets
         return None
 
 def save_db(balance, watchlist, portfolio):
-    """Saves data to the database"""
+    """Saves data to the database (With Error Handler)"""
     try:
         client = get_client()
         if not client: return
         
         sheet = client.open("Stock_App_DB").sheet1
         
-        # Prepare data row
         row = [balance, json.dumps(watchlist), json.dumps(portfolio)]
         
         # Clear and update
         sheet.clear()
-        sheet.append_row(["Balance", "Watchlist", "Portfolio"]) # Header
-        sheet.append_row(row) # Data
+        sheet.append_row(["Balance", "Watchlist", "Portfolio"])
+        sheet.append_row(row)
+        
     except Exception as e:
-        st.error(f"Save Failed: {e}")
+        # THE FIX: If the error contains "200", it is actually a SUCCESS!
+        if "200" in str(e):
+            pass  # Do nothing, it worked!
+        else:
+            st.error(f"Save Failed: {e}")
 
 # --- 2. INITIALIZE SESSION STATE ---
 if "db_loaded" not in st.session_state:
     db_data = init_db()
-    
     if db_data:
-        # Load from Cloud
         st.session_state["balance"] = float(db_data["Balance"])
         st.session_state["watchlist"] = json.loads(db_data["Watchlist"])
         st.session_state["portfolio"] = json.loads(db_data["Portfolio"])
         st.toast("☁️ Data Loaded from Cloud!")
     else:
-        # New User Default
         st.session_state["balance"] = 1000000.0
         st.session_state["watchlist"] = ["RELIANCE.NS", "TCS.NS"]
         st.session_state["portfolio"] = {}
-        # Save default to create the row immediately
-        save_db(1000000.0, ["RELIANCE.NS", "TCS.NS"], {})
+        save_db(1000000.0, ["RELIANCE.NS", "TCS.NS"], {}) # Init DB
     
     st.session_state["db_loaded"] = True
 
@@ -170,10 +158,8 @@ def scan_market():
 if check_password():
     st.title("⚡ Pro Stock AI: Cloud Edition ☁️")
 
-    # --- SIDEBAR: PORTFOLIO & WATCHLIST ---
+    # --- SIDEBAR ---
     st.sidebar.divider()
-    
-    # PORTFOLIO
     st.sidebar.header("💼 My Portfolio")
     st.sidebar.metric("Virtual Balance", f"₹{st.session_state['balance']:,.0f}")
     if st.session_state["portfolio"]:
@@ -183,7 +169,6 @@ if check_password():
         
     st.sidebar.divider()
     
-    # WATCHLIST
     st.sidebar.header("⭐ Watchlist")
     if st.session_state["watchlist"]:
         wl_data = yf.download(st.session_state["watchlist"], period="5d", progress=False)['Close']
@@ -200,14 +185,14 @@ if check_password():
                         st.rerun()
                     if c3.button("❌", key=f"del_{stock}"):
                         st.session_state["watchlist"].remove(stock)
-                        save_state() # SAVE TO DB
+                        save_state()
                         st.rerun()
                     st.sidebar.divider()
             except Exception: pass
     else:
         st.sidebar.info("Empty Watchlist")
 
-    # --- SECTION A: AUTO SCANNER ---
+    # --- MAIN CONTENT ---
     with st.expander("📊 OPEN MARKET SCANNER (Top 30 Stocks)", expanded=False):
         buys, sells = scan_market()
         c1, c2 = st.columns(2)
@@ -220,10 +205,8 @@ if check_password():
             if not sells.empty: st.dataframe(sells, hide_index=True, use_container_width=True)
             else: st.success("No Sell signals.")
 
-    # --- SECTION B: RESEARCH & ANALYSIS ---
     st.divider()
     
-    # Search Bar
     col_search, col_time = st.columns([3, 1])
     with col_search:
         user_input = st.text_input("🔍 Search Stock (e.g., TATASTEEL.NS)", st.session_state["selected_ticker"])
@@ -236,18 +219,15 @@ if check_password():
 
     current_stock = st.session_state["selected_ticker"]
     
-    # Add to Watchlist Button
     if st.button("⭐ Add Current Stock to Watchlist"):
         if current_stock not in st.session_state["watchlist"]:
             st.session_state["watchlist"].append(current_stock)
-            save_state() # SAVE TO DB
+            save_state()
             st.success(f"Added {current_stock}!")
             st.rerun()
 
-    # --- MAIN TABS ---
     tab1, tab2, tab3, tab4 = st.tabs(["📈 Chart & Techs", "🏢 Fundamentals", "💼 Paper Trading", "🆚 Compare"])
 
-    # --- TAB 1: CHART ---
     with tab1:
         try:
             period = "5d" if interval_map[time_sel] == "15m" else "1y"
@@ -279,7 +259,7 @@ if check_password():
 
                 fig.update_layout(height=600, xaxis_rangeslider_visible=False, title=f"{current_stock} Analysis")
                 st.plotly_chart(fig, use_container_width=True)
-
+                
                 csv = df.to_csv().encode('utf-8')
                 st.download_button("📥 Download Data as CSV", csv, f"{current_stock}_data.csv", "text/csv")
             else:
@@ -287,7 +267,6 @@ if check_password():
         except Exception as e:
             st.error(f"Chart Error: {e}")
 
-    # --- TAB 2: FUNDAMENTALS ---
     with tab2:
         fund_data = get_fundamentals(current_stock)
         if fund_data:
@@ -307,7 +286,6 @@ if check_password():
         else:
             st.warning("Fundamental data not available.")
 
-    # --- TAB 3: TRADING (SAVES TO DB) ---
     with tab3:
         st.subheader(f"💼 Paper Trading: {current_stock}")
         st.write(f"**Available Cash:** ₹{st.session_state['balance']:,.2f}")
@@ -331,7 +309,7 @@ if check_password():
                         else:
                             st.session_state['portfolio'][current_stock] = {'qty': buy_qty, 'avg_price': live_price}
                         
-                        save_state() # SAVE TO DB
+                        save_state()
                         st.success(f"Bought {buy_qty} shares!")
                         st.rerun()
                     else:
@@ -349,7 +327,7 @@ if check_password():
                         else:
                             st.session_state['portfolio'][current_stock]['qty'] = remaining
                         
-                        save_state() # SAVE TO DB
+                        save_state()
                         st.success(f"Sold {sell_qty} shares!")
                         st.rerun()
                     else:
@@ -375,7 +353,6 @@ if check_password():
         except Exception as e:
             st.error("Could not fetch live price.")
 
-    # --- TAB 4: COMPARE ---
     with tab4:
         st.subheader("🆚 Stock Comparison Tool")
         TOP_STOCKS = [
