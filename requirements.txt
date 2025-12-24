@@ -2,3 +2,5 @@ streamlit
 yfinance
 plotly
 feedparser
+gspread
+oauth2client
