@@ -9,7 +9,7 @@ import json
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Pro Stock AI", layout="wide")
 
-# --- 1. GOOGLE SHEETS DATABASE CONNECTION (MODERN FIX) ---
+# --- 1. GOOGLE SHEETS DATABASE CONNECTION ---
 def get_client():
     """Connects to Google Sheets using the modern method"""
     try:
@@ -20,7 +20,7 @@ def get_client():
         if "\\n" in creds_dict["private_key"]:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
             
-        # Connect using gspread directly
+        # Connect using gspread directly (Modern Way)
         client = gspread.service_account_from_dict(creds_dict)
         return client
     except Exception as e:
@@ -42,7 +42,8 @@ def init_db():
             return None
         return data[0] # Return the first row
     except Exception as e:
-        # If sheet is empty or not found, return None
+        # If the sheet is empty, that's okay (new user)
+        # We don't want to show an error for empty sheets
         return None
 
 def save_db(balance, watchlist, portfolio):
@@ -78,7 +79,7 @@ if "db_loaded" not in st.session_state:
         st.session_state["balance"] = 1000000.0
         st.session_state["watchlist"] = ["RELIANCE.NS", "TCS.NS"]
         st.session_state["portfolio"] = {}
-        # Save default to create the row
+        # Save default to create the row immediately
         save_db(1000000.0, ["RELIANCE.NS", "TCS.NS"], {})
     
     st.session_state["db_loaded"] = True

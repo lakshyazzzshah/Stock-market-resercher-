@@ -1,6 +1,7 @@
 streamlit
 yfinance
 plotly
+pandas
 feedparser
-gspread
-oauth2client
+gspread==6.0.0
+google-auth
