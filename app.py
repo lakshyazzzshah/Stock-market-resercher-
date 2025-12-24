@@ -4,47 +4,56 @@ import plotly.graph_objs as go
 import pandas as pd
 import feedparser
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Pro Stock AI", layout="wide")
 
-# --- 1. GOOGLE SHEETS DATABASE CONNECTION ---
-def init_db():
-    """Connects to Google Sheet and loads data"""
+# --- 1. GOOGLE SHEETS DATABASE CONNECTION (MODERN FIX) ---
+def get_client():
+    """Connects to Google Sheets using the modern method"""
     try:
-        # Load credentials from Streamlit Secrets
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(dict(st.secrets["gcp_service_account"]), scope)
-        client = gspread.authorize(creds)
+        # Create a dictionary from the secrets
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        
+        # FIX: Ensure private key has correct newlines
+        if "\\n" in creds_dict["private_key"]:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            
+        # Connect using gspread directly
+        client = gspread.service_account_from_dict(creds_dict)
+        return client
+    except Exception as e:
+        st.error(f"Login Error: {e}")
+        return None
+
+def init_db():
+    """Loads data from the database"""
+    try:
+        client = get_client()
+        if not client: return None
         
         # Open the Sheet
         sheet = client.open("Stock_App_DB").sheet1
         
         # Try to fetch existing data
-        try:
-            data = sheet.get_all_records()
-            if not data:
-                return None
-            # Return the first row as the user state
-            return data[0]
-        except:
+        data = sheet.get_all_records()
+        if not data:
             return None
+        return data[0] # Return the first row
     except Exception as e:
-        st.error(f"Database Error: {e}")
+        # If sheet is empty or not found, return None
         return None
 
 def save_db(balance, watchlist, portfolio):
-    """Saves current state to Google Sheet"""
+    """Saves data to the database"""
     try:
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(dict(st.secrets["gcp_service_account"]), scope)
-        client = gspread.authorize(creds)
+        client = get_client()
+        if not client: return
+        
         sheet = client.open("Stock_App_DB").sheet1
         
-        # Prepare data as a single row with JSON strings
-        # We store complex lists/dicts as JSON text so they fit in one cell
+        # Prepare data row
         row = [balance, json.dumps(watchlist), json.dumps(portfolio)]
         
         # Clear and update
@@ -81,7 +90,6 @@ if "selected_ticker" not in st.session_state:
 
 # --- 3. HELPER FUNCTIONS ---
 def save_state():
-    """Wrapper to save state after any change"""
     save_db(st.session_state["balance"], st.session_state["watchlist"], st.session_state["portfolio"])
 
 def check_password():
