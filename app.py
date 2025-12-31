@@ -1,10 +1,10 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import gspread
 import json
 import hashlib
 import os
+import time
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Pro Stock AI", layout="centered", initial_sidebar_state="collapsed")
@@ -19,13 +19,9 @@ st.markdown("""
     .hero-title { font-size: 50px; font-weight: 800; background: -webkit-linear-gradient(45deg, #00FF7F, #00BFFF); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center; margin-bottom: 10px;}
     .hero-sub { font-size: 18px; color: #A0A5B5; text-align: center; margin-bottom: 40px; }
     .feature-box { background: #151821; padding: 15px; border-radius: 12px; border: 1px solid #2E3345; text-align: center; }
-    
-    /* Pricing Cards */
     .price-card { background: #151821; border: 1px solid #2E3345; border-radius: 15px; padding: 20px; text-align: center; transition: 0.3s; }
     .price-card:hover { border-color: #00FF7F; transform: scale(1.02); }
     .price-amount { font-size: 32px; font-weight: bold; color: #FAFAFA; }
-    .price-period { font-size: 14px; color: #A0A5B5; }
-    
     .stTextInput input { background-color: #151821 !important; color: white !important; border-radius: 12px; border: 1px solid #2E3345; }
     div[data-testid="stMetricValue"] { font-size: 28px; color: #ffffff; }
     #MainMenu {visibility: hidden;}
@@ -33,118 +29,137 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 1. BACKEND (Database & Auth) ---
-def get_client():
-    try:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        if "\\n" in creds_dict["private_key"]:
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-        client = gspread.service_account_from_dict(creds_dict)
-        return client
-    except: return None
+# --- 1. LOCAL DATABASE SYSTEM (NO GOOGLE CLOUD NEEDED) ---
+USERS_FILE = "users_db.csv"
+DATA_FILE = "app_data.csv"
+
+def init_local_db():
+    # Create Users File if not exists
+    if not os.path.exists(USERS_FILE):
+        df = pd.DataFrame(columns=["Username", "PasswordHash", "Status"])
+        # Add Admin
+        admin_row = pd.DataFrame([{"Username": "arun", "PasswordHash": hashlib.sha256(str.encode("9700")).hexdigest(), "Status": "Active"}])
+        df = pd.concat([df, admin_row], ignore_index=True)
+        df.to_csv(USERS_FILE, index=False)
+    
+    # Create Data File if not exists
+    if not os.path.exists(DATA_FILE):
+        df = pd.DataFrame(columns=["Username", "Balance", "Watchlist", "Portfolio"])
+        # Add Admin Data
+        admin_data = pd.DataFrame([{
+            "Username": "arun", 
+            "Balance": 1000000.0, 
+            "Watchlist": json.dumps(["RELIANCE.NS", "TCS.NS"]), 
+            "Portfolio": json.dumps({})
+        }])
+        df = pd.concat([df, admin_data], ignore_index=True)
+        df.to_csv(DATA_FILE, index=False)
 
 def make_hash(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 def check_login(username, password):
-    client = get_client()
-    if not client: return False, "Error"
     try:
-        try: sheet = client.open("Stock_App_DB").worksheet("Users")
-        except: 
-            sheet = client.open("Stock_App_DB").add_worksheet(title="Users", rows=100, cols=3)
-            sheet.append_row(["Username", "PasswordHash", "Status"])
-        users = sheet.get_all_records()
+        df = pd.read_csv(USERS_FILE)
         hashed_pw = make_hash(password)
-        for user in users:
-            if user['Username'] == username and user['PasswordHash'] == hashed_pw:
-                # Returns (True, Status)
-                return True, user.get("Status", "Inactive")
+        user = df[(df['Username'] == username) & (df['PasswordHash'] == hashed_pw)]
+        if not user.empty:
+            return True, user.iloc[0]['Status']
         return False, "Invalid"
     except: return False, "Error"
 
 def sign_up_user(username, password):
-    client = get_client()
-    if not client: return False
     try:
-        try: sheet = client.open("Stock_App_DB").worksheet("Users")
-        except: 
-            sheet = client.open("Stock_App_DB").add_worksheet(title="Users", rows=100, cols=3)
-            sheet.append_row(["Username", "PasswordHash", "Status"])
-        if sheet.find(username): return False
-        sheet.append_row([username, make_hash(password), "Inactive"])
+        df = pd.read_csv(USERS_FILE)
+        if username in df['Username'].values:
+            return False
+        
+        new_user = pd.DataFrame([{
+            "Username": username, 
+            "PasswordHash": make_hash(password), 
+            "Status": "Inactive"
+        }])
+        df = pd.concat([df, new_user], ignore_index=True)
+        df.to_csv(USERS_FILE, index=False)
         return True
     except: return False
 
 def request_activation(username):
-    """Updates status to Pending"""
-    client = get_client()
-    if not client: return False
     try:
-        sheet = client.open("Stock_App_DB").worksheet("Users")
-        cell = sheet.find(username)
-        if cell:
-            sheet.update_cell(cell.row, 3, "Pending")
+        df = pd.read_csv(USERS_FILE)
+        idx = df.index[df['Username'] == username].tolist()
+        if idx:
+            df.at[idx[0], 'Status'] = 'Pending'
+            df.to_csv(USERS_FILE, index=False)
             return True
+        return False
     except: return False
 
 def activate_user(username):
-    """Admin function to activate user"""
-    client = get_client()
-    if not client: return False
     try:
-        sheet = client.open("Stock_App_DB").worksheet("Users")
-        cell = sheet.find(username)
-        if cell:
-            sheet.update_cell(cell.row, 3, "Active")
+        df = pd.read_csv(USERS_FILE)
+        idx = df.index[df['Username'] == username].tolist()
+        if idx:
+            df.at[idx[0], 'Status'] = 'Active'
+            df.to_csv(USERS_FILE, index=False)
             return True
+        return False
     except: return False
 
 def load_user_data(username):
-    client = get_client()
-    if not client: return None
     try:
-        try: sheet = client.open("Stock_App_DB").worksheet("AppData")
-        except: 
-            sheet = client.open("Stock_App_DB").add_worksheet(title="AppData", rows=100, cols=4)
-            sheet.append_row(["Username", "Balance", "Watchlist", "Portfolio"])
-        cell = sheet.find(username)
-        if cell:
-            row_values = sheet.row_values(cell.row)
-            return {"Balance": float(row_values[1]), "Watchlist": json.loads(row_values[2]), "Portfolio": json.loads(row_values[3])}
-        else:
-            default_data = [username, 1000000.0, json.dumps(["RELIANCE.NS", "TCS.NS"]), json.dumps({})]
-            sheet.append_row(default_data)
+        df = pd.read_csv(DATA_FILE)
+        user_row = df[df['Username'] == username]
+        
+        if user_row.empty:
+            # Create default data
+            new_data = pd.DataFrame([{
+                "Username": username, 
+                "Balance": 1000000.0, 
+                "Watchlist": json.dumps(["RELIANCE.NS", "TCS.NS"]), 
+                "Portfolio": json.dumps({})
+            }])
+            # Append and Save
+            new_data.to_csv(DATA_FILE, mode='a', header=False, index=False)
             return {"Balance": 1000000.0, "Watchlist": ["RELIANCE.NS", "TCS.NS"], "Portfolio": {}}
+        
+        row = user_row.iloc[0]
+        return {
+            "Balance": float(row["Balance"]),
+            "Watchlist": json.loads(row["Watchlist"]),
+            "Portfolio": json.loads(row["Portfolio"])
+        }
     except: return None
 
 def save_user_data(username, balance, watchlist, portfolio):
-    client = get_client()
-    if not client: return
     try:
-        sheet = client.open("Stock_App_DB").worksheet("AppData")
-        cell = sheet.find(username)
-        row_data = [username, balance, json.dumps(watchlist), json.dumps(portfolio)]
-        if cell:
-            for i, val in enumerate(row_data): sheet.update_cell(cell.row, i+1, val)
-        else: sheet.append_row(row_data)
+        df = pd.read_csv(DATA_FILE)
+        idx = df.index[df['Username'] == username].tolist()
+        
+        if idx:
+            df.at[idx[0], 'Balance'] = balance
+            df.at[idx[0], 'Watchlist'] = json.dumps(watchlist)
+            df.at[idx[0], 'Portfolio'] = json.dumps(portfolio)
+        else:
+            new_row = pd.DataFrame([{
+                "Username": username,
+                "Balance": balance,
+                "Watchlist": json.dumps(watchlist),
+                "Portfolio": json.dumps(portfolio)
+            }])
+            df = pd.concat([df, new_row], ignore_index=True)
+            
+        df.to_csv(DATA_FILE, index=False)
     except: pass
 
-# --- 2. SESSION & STATE MANAGEMENT ---
+# Initialize Files
+init_local_db()
+
+# --- 2. SESSION STATE ---
 if "page" not in st.session_state: st.session_state["page"] = "welcome"
 if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
 if "username" not in st.session_state: st.session_state["username"] = ""
 if "subscription_status" not in st.session_state: st.session_state["subscription_status"] = "Inactive"
-
-# Auto-Create Admin 'arun'
-if "admin_check" not in st.session_state:
-    client = get_client()
-    if client:
-        try:
-            sheet = client.open("Stock_App_DB").worksheet("Users")
-            if not sheet.find("arun"): sheet.append_row(["arun", make_hash("9700"), "Active"])
-        except: pass
-    st.session_state["admin_check"] = True
 
 def logout():
     st.session_state["logged_in"] = False
@@ -179,7 +194,6 @@ def welcome_page():
 def login_page():
     st.markdown('<div class="css-card">', unsafe_allow_html=True)
     st.title("🔐 Login")
-    st.caption("Access your personal portfolio.")
     
     tab1, tab2 = st.tabs(["Login", "Sign Up"])
     
@@ -198,14 +212,14 @@ def login_page():
             else: st.error("Incorrect details.")
                 
     with tab2:
-        st.info("ℹ️ New accounts require manual activation after payment.")
+        st.info("ℹ️ New accounts require activation.")
         new_user = st.text_input("New Username", key="s_user")
         new_pw = st.text_input("New Password", type="password", key="s_pw")
         if st.button("Create Account", use_container_width=True):
-            if sign_up_user(new_user, new_pw): st.success("Account Created! Please Log In.")
+            if sign_up_user(new_user, new_pw): st.success("Created! Please Log In.")
             else: st.error("Username taken.")
             
-    if st.button("← Back to Home"):
+    if st.button("← Back"):
         st.session_state["page"] = "welcome"
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
@@ -215,45 +229,34 @@ def payment_page():
     st.title("🔒 Choose Your Plan")
     st.caption(f"Hello {st.session_state['username']}, please select a subscription.")
 
-    # Status Message
     status = st.session_state.get("subscription_status", "Inactive")
     if status == "Pending":
-        st.info("⏳ Your payment is under review! Please wait for Admin approval.")
+        st.info("⏳ Payment Under Review. Please wait for Admin approval.")
     
-    # PRICING CARDS
     c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown('<div class="price-card"><h3>Starter</h3><div class="price-amount">₹100</div><div class="price-period">1 Month</div><br><small>✅ Full Access<br>✅ Portfolio<br>✅ AI Scores</small></div>', unsafe_allow_html=True)
-    with c2:
-        st.markdown('<div class="price-card" style="border-color: #FFD700;"><h3 style="color:#FFD700">Value</h3><div class="price-amount">₹279</div><div class="price-period">3 Months</div><br><small>✅ Save 7%<br>✅ Priority Support<br>✅ All Features</small></div>', unsafe_allow_html=True)
-    with c3:
-        st.markdown('<div class="price-card"><h3>Pro</h3><div class="price-amount">₹1000</div><div class="price-period">1 Year</div><br><small>✅ Save 17%<br>✅ Long Term<br>✅ All Features</small></div>', unsafe_allow_html=True)
+    with c1: st.markdown('<div class="price-card"><h3>Starter</h3><div class="price-amount">₹100</div><div class="price-period">1 Month</div><br><small>✅ Full Access</small></div>', unsafe_allow_html=True)
+    with c2: st.markdown('<div class="price-card" style="border-color: #FFD700;"><h3 style="color:#FFD700">Value</h3><div class="price-amount">₹279</div><div class="price-period">3 Months</div><br><small>✅ Best Seller</small></div>', unsafe_allow_html=True)
+    with c3: st.markdown('<div class="price-card"><h3>Pro</h3><div class="price-amount">₹1000</div><div class="price-period">1 Year</div><br><small>✅ Save Big</small></div>', unsafe_allow_html=True)
     
     st.divider()
     
-    # QR CODE SECTION
     st.markdown("### 📲 Scan to Pay")
     col_qr, col_info = st.columns([1, 2])
     
     with col_qr:
-        if os.path.exists("qrcode.jpg"): st.image("qrcode.jpg", caption="Scan with Any UPI App", width=200)
+        if os.path.exists("qrcode.jpg"): st.image("qrcode.jpg", width=200)
         else: st.warning("⚠️ Admin: Upload 'qrcode.jpg' to GitHub")
             
     with col_info:
-        st.markdown("""
-        1. Select plan (₹100, ₹279, or ₹1000).
-        2. Scan QR or pay to **lakshyazzzshah@gmail.com**
-        3. **Click the button below** to notify Admin.
-        """)
+        st.markdown("1. Pay via UPI.\n2. **Click button below** to notify Admin.")
         
-        # THE NOTIFICATION BUTTON
         if st.button("✅ I Have Made Payment", type="primary"):
             if request_activation(st.session_state["username"]):
                 st.session_state["subscription_status"] = "Pending"
-                st.success("Admin Notified! We will activate your account shortly.")
+                st.success("Admin Notified!")
+                time.sleep(1)
                 st.rerun()
-            else:
-                st.error("Error connecting to server.")
+            else: st.error("Error connecting.")
         
     if st.button("Log Out"): logout()
     st.markdown('</div>', unsafe_allow_html=True)
@@ -363,36 +366,29 @@ def main_app():
             pl_color = "#00FF7F" if pl >= 0 else "#FF4B4B"
             st.markdown(f'<div style="background:#1E2130; padding:15px; border-radius:12px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;"><div><span style="font-weight:bold; font-size:18px;">{t}</span><br><span style="color:#A0A5B5; font-size:12px;">{d["qty"]} Shares</span></div><div style="text-align:right;"><span style="font-weight:bold; font-size:18px; color:{pl_color}">₹{pl:,.0f}</span></div></div>', unsafe_allow_html=True)
 
-    # --- ADMIN PANEL (Only for 'arun') ---
+    # ADMIN PANEL (Only for 'arun')
     if st.session_state["username"] == "arun":
         st.divider()
-        st.markdown("### 👑 Admin: Manage Users")
+        st.markdown("### 👑 Admin Panel")
         st.markdown('<div class="css-card">', unsafe_allow_html=True)
         
-        client = get_client()
-        sheet = client.open("Stock_App_DB").worksheet("Users")
-        data = sheet.get_all_records()
-        df = pd.DataFrame(data)
-        
-        # Filter only Pending requests
-        pending_users = df[df['Status'] == 'Pending']
-        
-        if not pending_users.empty:
-            st.error(f"🔔 You have {len(pending_users)} Pending Payments!")
-            st.dataframe(pending_users[["Username", "Status"]], use_container_width=True)
+        try:
+            df = pd.read_csv(USERS_FILE)
+            pending_users = df[df['Status'] == 'Pending']
             
-            # Simple approval form
-            u_to_approve = st.selectbox("Select User to Approve", pending_users['Username'].unique())
-            if st.button(f"✅ Approve Payment for {u_to_approve}"):
-                if activate_user(u_to_approve):
-                    st.success(f"{u_to_approve} is now Active!")
+            if not pending_users.empty:
+                st.error(f"🔔 {len(pending_users)} Pending Request(s)")
+                u_to_approve = st.selectbox("Select User", pending_users['Username'].unique())
+                if st.button(f"✅ Approve {u_to_approve}"):
+                    activate_user(u_to_approve)
+                    st.success("Approved!")
                     st.rerun()
-                else: st.error("Failed to update.")
-        else:
-            st.success("No pending payments.")
-            st.write("All Users:")
-            st.dataframe(df[["Username", "Status"]], use_container_width=True)
-            
+            else:
+                st.success("No Pending Requests")
+                
+            with st.expander("View All Users"):
+                st.dataframe(df[["Username", "Status"]], use_container_width=True)
+        except: st.error("Could not load admin data")
         st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 4. NAVIGATION ---
