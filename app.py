@@ -1,376 +1,409 @@
 import streamlit as st
 import yfinance as yf
-import plotly.graph_objs as go
 import pandas as pd
-import feedparser
 import gspread
 import json
+import hashlib
+import os
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Pro Stock AI", layout="wide")
+st.set_page_config(page_title="Pro Stock AI", layout="centered", initial_sidebar_state="collapsed")
 
-# --- 1. GOOGLE SHEETS DATABASE CONNECTION ---
+# --- 🎨 CUSTOM MODERN CSS ---
+st.markdown("""
+<style>
+    .stApp { background-color: #0E1117; color: #FAFAFA; }
+    .css-card { background-color: #1E2130; border-radius: 20px; padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); margin-bottom: 20px; border: 1px solid #2E3345; }
+    .score-badge { font-size: 60px; font-weight: 800; text-align: center; margin: 0; padding: 0; }
+    .score-title { text-transform: uppercase; letter-spacing: 2px; font-size: 14px; color: #A0A5B5; text-align: center; }
+    .hero-title { font-size: 50px; font-weight: 800; background: -webkit-linear-gradient(45deg, #00FF7F, #00BFFF); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center; margin-bottom: 10px;}
+    .hero-sub { font-size: 18px; color: #A0A5B5; text-align: center; margin-bottom: 40px; }
+    .feature-box { background: #151821; padding: 15px; border-radius: 12px; border: 1px solid #2E3345; text-align: center; }
+    
+    /* Pricing Cards */
+    .price-card { background: #151821; border: 1px solid #2E3345; border-radius: 15px; padding: 20px; text-align: center; transition: 0.3s; }
+    .price-card:hover { border-color: #00FF7F; transform: scale(1.02); }
+    .price-amount { font-size: 32px; font-weight: bold; color: #FAFAFA; }
+    .price-period { font-size: 14px; color: #A0A5B5; }
+    
+    .stTextInput input { background-color: #151821 !important; color: white !important; border-radius: 12px; border: 1px solid #2E3345; }
+    div[data-testid="stMetricValue"] { font-size: 28px; color: #ffffff; }
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
+# --- 1. BACKEND (Database & Auth) ---
 def get_client():
-    """Connects to Google Sheets using the modern method"""
     try:
         creds_dict = dict(st.secrets["gcp_service_account"])
         if "\\n" in creds_dict["private_key"]:
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         client = gspread.service_account_from_dict(creds_dict)
         return client
-    except Exception as e:
-        st.error(f"Login Error: {e}")
-        return None
+    except: return None
 
-def init_db():
-    """Loads data from the database"""
+def make_hash(password):
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def check_login(username, password):
+    client = get_client()
+    if not client: return False, "Error"
     try:
-        client = get_client()
-        if not client: return None
-        sheet = client.open("Stock_App_DB").sheet1
-        data = sheet.get_all_records()
-        if not data: return None
-        return data[0]
-    except Exception as e:
-        return None
+        try: sheet = client.open("Stock_App_DB").worksheet("Users")
+        except: 
+            sheet = client.open("Stock_App_DB").add_worksheet(title="Users", rows=100, cols=3)
+            sheet.append_row(["Username", "PasswordHash", "Status"])
+        users = sheet.get_all_records()
+        hashed_pw = make_hash(password)
+        for user in users:
+            if user['Username'] == username and user['PasswordHash'] == hashed_pw:
+                # Returns (True, Status)
+                return True, user.get("Status", "Inactive")
+        return False, "Invalid"
+    except: return False, "Error"
 
-def save_db(balance, watchlist, portfolio):
-    """Saves data to the database (With Error Handler)"""
+def sign_up_user(username, password):
+    client = get_client()
+    if not client: return False
     try:
-        client = get_client()
-        if not client: return
-        
-        sheet = client.open("Stock_App_DB").sheet1
-        
-        row = [balance, json.dumps(watchlist), json.dumps(portfolio)]
-        
-        # Clear and update
-        sheet.clear()
-        sheet.append_row(["Balance", "Watchlist", "Portfolio"])
-        sheet.append_row(row)
-        
-    except Exception as e:
-        # THE FIX: If the error contains "200", it is actually a SUCCESS!
-        if "200" in str(e):
-            pass  # Do nothing, it worked!
-        else:
-            st.error(f"Save Failed: {e}")
-
-# --- 2. INITIALIZE SESSION STATE ---
-if "db_loaded" not in st.session_state:
-    db_data = init_db()
-    if db_data:
-        st.session_state["balance"] = float(db_data["Balance"])
-        st.session_state["watchlist"] = json.loads(db_data["Watchlist"])
-        st.session_state["portfolio"] = json.loads(db_data["Portfolio"])
-        st.toast("☁️ Data Loaded from Cloud!")
-    else:
-        st.session_state["balance"] = 1000000.0
-        st.session_state["watchlist"] = ["RELIANCE.NS", "TCS.NS"]
-        st.session_state["portfolio"] = {}
-        save_db(1000000.0, ["RELIANCE.NS", "TCS.NS"], {}) # Init DB
-    
-    st.session_state["db_loaded"] = True
-
-if "password_correct" not in st.session_state:
-    st.session_state["password_correct"] = False
-if "selected_ticker" not in st.session_state:
-    st.session_state["selected_ticker"] = "RELIANCE.NS"
-
-# --- 3. HELPER FUNCTIONS ---
-def save_state():
-    save_db(st.session_state["balance"], st.session_state["watchlist"], st.session_state["portfolio"])
-
-def check_password():
-    if st.session_state["password_correct"]:
+        try: sheet = client.open("Stock_App_DB").worksheet("Users")
+        except: 
+            sheet = client.open("Stock_App_DB").add_worksheet(title="Users", rows=100, cols=3)
+            sheet.append_row(["Username", "PasswordHash", "Status"])
+        if sheet.find(username): return False
+        sheet.append_row([username, make_hash(password), "Inactive"])
         return True
-    password = st.sidebar.text_input("🔑 Enter Password", type="password")
-    if password == "12345":
-        st.session_state["password_correct"] = True
-        st.rerun()
-    return False
+    except: return False
 
-def calculate_rsi_series(series, window=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / (loss + 1e-10)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
-
-def get_google_news(ticker):
-    clean_name = ticker.replace(".NS", "").replace(".BO", "")
-    rss_url = f"https://news.google.com/rss/search?q={clean_name}+stock+news+india&hl=en-IN&gl=IN&ceid=IN:en"
-    feed = feedparser.parse(rss_url)
-    return feed.entries[:3]
-
-def get_fundamentals(ticker):
+def request_activation(username):
+    """Updates status to Pending"""
+    client = get_client()
+    if not client: return False
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        return {
-            "Market Cap": info.get("marketCap", "N/A"),
-            "P/E Ratio": info.get("trailingPE", "N/A"),
-            "52W High": info.get("fiftyTwoWeekHigh", "N/A"),
-            "Sector": info.get("sector", "Unknown"),
-            "Business Summary": info.get("longBusinessSummary", "No summary available.")[:300] + "..."
-        }
-    except:
-        return None
+        sheet = client.open("Stock_App_DB").worksheet("Users")
+        cell = sheet.find(username)
+        if cell:
+            sheet.update_cell(cell.row, 3, "Pending")
+            return True
+    except: return False
 
-# --- 4. SCANNER ENGINE ---
-@st.cache_data(ttl=600)
-def scan_market():
-    TOP_STOCKS = [
-        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
-        "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
-        "LICI.NS", "LT.NS", "AXISBANK.NS", "HCLTECH.NS", "ASIANPAINT.NS",
-        "MARUTI.NS", "TITAN.NS", "SUNPHARMA.NS", "ULTRACEMCO.NS", "BAJFINANCE.NS",
-        "TATAMOTORS.NS", "ADANIENT.NS", "WIPRO.NS", "NTPC.NS", "POWERGRID.NS",
-        "ONGC.NS", "JSWSTEEL.NS", "TATASTEEL.NS", "COALINDIA.NS", "ZOMATO.NS"
-    ]
-    data = yf.download(TOP_STOCKS, period="3mo", progress=False)
-    if isinstance(data.columns, pd.MultiIndex):
-        try: close_data = data['Close']
-        except KeyError: close_data = data.xs('Close', level=0, axis=1)
-    else:
-        close_data = data['Close']
+def activate_user(username):
+    """Admin function to activate user"""
+    client = get_client()
+    if not client: return False
+    try:
+        sheet = client.open("Stock_App_DB").worksheet("Users")
+        cell = sheet.find(username)
+        if cell:
+            sheet.update_cell(cell.row, 3, "Active")
+            return True
+    except: return False
 
-    buy_list = []
-    sell_list = []
-    
-    for ticker in TOP_STOCKS:
+def load_user_data(username):
+    client = get_client()
+    if not client: return None
+    try:
+        try: sheet = client.open("Stock_App_DB").worksheet("AppData")
+        except: 
+            sheet = client.open("Stock_App_DB").add_worksheet(title="AppData", rows=100, cols=4)
+            sheet.append_row(["Username", "Balance", "Watchlist", "Portfolio"])
+        cell = sheet.find(username)
+        if cell:
+            row_values = sheet.row_values(cell.row)
+            return {"Balance": float(row_values[1]), "Watchlist": json.loads(row_values[2]), "Portfolio": json.loads(row_values[3])}
+        else:
+            default_data = [username, 1000000.0, json.dumps(["RELIANCE.NS", "TCS.NS"]), json.dumps({})]
+            sheet.append_row(default_data)
+            return {"Balance": 1000000.0, "Watchlist": ["RELIANCE.NS", "TCS.NS"], "Portfolio": {}}
+    except: return None
+
+def save_user_data(username, balance, watchlist, portfolio):
+    client = get_client()
+    if not client: return
+    try:
+        sheet = client.open("Stock_App_DB").worksheet("AppData")
+        cell = sheet.find(username)
+        row_data = [username, balance, json.dumps(watchlist), json.dumps(portfolio)]
+        if cell:
+            for i, val in enumerate(row_data): sheet.update_cell(cell.row, i+1, val)
+        else: sheet.append_row(row_data)
+    except: pass
+
+# --- 2. SESSION & STATE MANAGEMENT ---
+if "page" not in st.session_state: st.session_state["page"] = "welcome"
+if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
+if "username" not in st.session_state: st.session_state["username"] = ""
+if "subscription_status" not in st.session_state: st.session_state["subscription_status"] = "Inactive"
+
+# Auto-Create Admin 'arun'
+if "admin_check" not in st.session_state:
+    client = get_client()
+    if client:
         try:
-            prices = close_data[ticker].dropna()
-            if len(prices) < 50: continue
-            current_price = prices.iloc[-1]
-            rsi = calculate_rsi_series(prices).iloc[-1]
-            
-            if rsi < 35:
-                buy_list.append({"Stock": ticker, "Price": f"₹{current_price:.1f}", "RSI": f"{rsi:.1f}"})
-            elif rsi > 65:
-                sell_list.append({"Stock": ticker, "Price": f"₹{current_price:.1f}", "RSI": f"{rsi:.1f}"})
-        except Exception:
-            continue     
-    return pd.DataFrame(buy_list), pd.DataFrame(sell_list)
+            sheet = client.open("Stock_App_DB").worksheet("Users")
+            if not sheet.find("arun"): sheet.append_row(["arun", make_hash("9700"), "Active"])
+        except: pass
+    st.session_state["admin_check"] = True
 
-# --- 5. MAIN APP UI ---
-if check_password():
-    st.title("⚡ Pro Stock AI: Cloud Edition ☁️")
+def logout():
+    st.session_state["logged_in"] = False
+    st.session_state["username"] = ""
+    st.session_state["subscription_status"] = "Inactive"
+    st.session_state["page"] = "welcome"
+    st.rerun()
 
-    # --- SIDEBAR ---
-    st.sidebar.divider()
-    st.sidebar.header("💼 My Portfolio")
-    st.sidebar.metric("Virtual Balance", f"₹{st.session_state['balance']:,.0f}")
-    if st.session_state["portfolio"]:
-        st.sidebar.success(f"Holdings: {len(st.session_state['portfolio'])} Stocks")
-    else:
-        st.sidebar.info("No active trades.")
-        
-    st.sidebar.divider()
+def go_to_login():
+    st.session_state["page"] = "login"
+    st.rerun()
+
+# --- 3. UI PAGES ---
+
+def welcome_page():
+    st.markdown('<div style="padding-top: 50px;"></div>', unsafe_allow_html=True)
+    st.markdown('<h1 class="hero-title">Investing Wisdom,<br>Simplified.</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="hero-sub">Analyze stocks using legendary strategies.<br>Premium Access Only.</p>', unsafe_allow_html=True)
     
-    st.sidebar.header("⭐ Watchlist")
-    if st.session_state["watchlist"]:
-        wl_data = yf.download(st.session_state["watchlist"], period="5d", progress=False)['Close']
-        if isinstance(wl_data, pd.Series): wl_data = wl_data.to_frame(name=st.session_state["watchlist"][0])
+    c1, c2, c3 = st.columns(3)
+    with c1: st.markdown('<div class="feature-box">📚<br><b>Book Wisdom</b><br><span style="font-size:12px; color:#A0A5B5">Strategies from top best-sellers.</span></div>', unsafe_allow_html=True)
+    with c2: st.markdown('<div class="feature-box">🤖<br><b>AI Score</b><br><span style="font-size:12px; color:#A0A5B5">Simple 0-100 verdict on any stock.</span></div>', unsafe_allow_html=True)
+    with c3: st.markdown('<div class="feature-box">🛡️<br><b>Trust Check</b><br><span style="font-size:12px; color:#A0A5B5">Avoid scams with Reliability checks.</span></div>', unsafe_allow_html=True)
+    
+    st.markdown('<br><br>', unsafe_allow_html=True)
+    col_center = st.columns([1, 2, 1])
+    with col_center[1]:
+        if st.button("🚀 Member Login", type="primary", use_container_width=True):
+            go_to_login()
+    st.markdown('<p style="text-align:center; margin-top:50px; font-size:12px; color:#555;">© 2024 Pro Stock AI. All Rights Reserved.</p>', unsafe_allow_html=True)
 
-        for stock in st.session_state["watchlist"]:
-            try:
-                if stock in wl_data.columns:
-                    price = wl_data[stock].iloc[-1]
-                    c1, c2, c3 = st.sidebar.columns([3, 2, 1])
-                    c1.markdown(f"**{stock}**\n₹{price:,.1f}")
-                    if c2.button("📊", key=f"view_{stock}"):
-                        st.session_state["selected_ticker"] = stock
-                        st.rerun()
-                    if c3.button("❌", key=f"del_{stock}"):
-                        st.session_state["watchlist"].remove(stock)
-                        save_state()
-                        st.rerun()
-                    st.sidebar.divider()
-            except Exception: pass
-    else:
-        st.sidebar.info("Empty Watchlist")
+def login_page():
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    st.title("🔐 Login")
+    st.caption("Access your personal portfolio.")
+    
+    tab1, tab2 = st.tabs(["Login", "Sign Up"])
+    
+    with tab1:
+        user = st.text_input("Username", key="l_user")
+        pw = st.text_input("Password", type="password", key="l_pw")
+        if st.button("Log In", type="primary", use_container_width=True):
+            success, status = check_login(user, pw)
+            if success:
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = user
+                st.session_state["subscription_status"] = status
+                if status == "Active": st.session_state["page"] = "app"
+                else: st.session_state["page"] = "payment"
+                st.rerun()
+            else: st.error("Incorrect details.")
+                
+    with tab2:
+        st.info("ℹ️ New accounts require manual activation after payment.")
+        new_user = st.text_input("New Username", key="s_user")
+        new_pw = st.text_input("New Password", type="password", key="s_pw")
+        if st.button("Create Account", use_container_width=True):
+            if sign_up_user(new_user, new_pw): st.success("Account Created! Please Log In.")
+            else: st.error("Username taken.")
+            
+    if st.button("← Back to Home"):
+        st.session_state["page"] = "welcome"
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- MAIN CONTENT ---
-    with st.expander("📊 OPEN MARKET SCANNER (Top 30 Stocks)", expanded=False):
-        buys, sells = scan_market()
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("🟢 Suggested BUYS")
-            if not buys.empty: st.dataframe(buys, hide_index=True, use_container_width=True)
-            else: st.info("No Buy signals.")
-        with c2:
-            st.subheader("🔴 Suggested SELLS")
-            if not sells.empty: st.dataframe(sells, hide_index=True, use_container_width=True)
-            else: st.success("No Sell signals.")
+def payment_page():
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    st.title("🔒 Choose Your Plan")
+    st.caption(f"Hello {st.session_state['username']}, please select a subscription.")
 
+    # Status Message
+    status = st.session_state.get("subscription_status", "Inactive")
+    if status == "Pending":
+        st.info("⏳ Your payment is under review! Please wait for Admin approval.")
+    
+    # PRICING CARDS
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown('<div class="price-card"><h3>Starter</h3><div class="price-amount">₹100</div><div class="price-period">1 Month</div><br><small>✅ Full Access<br>✅ Portfolio<br>✅ AI Scores</small></div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown('<div class="price-card" style="border-color: #FFD700;"><h3 style="color:#FFD700">Value</h3><div class="price-amount">₹279</div><div class="price-period">3 Months</div><br><small>✅ Save 7%<br>✅ Priority Support<br>✅ All Features</small></div>', unsafe_allow_html=True)
+    with c3:
+        st.markdown('<div class="price-card"><h3>Pro</h3><div class="price-amount">₹1000</div><div class="price-period">1 Year</div><br><small>✅ Save 17%<br>✅ Long Term<br>✅ All Features</small></div>', unsafe_allow_html=True)
+    
     st.divider()
     
-    col_search, col_time = st.columns([3, 1])
-    with col_search:
-        user_input = st.text_input("🔍 Search Stock (e.g., TATASTEEL.NS)", st.session_state["selected_ticker"])
-        if user_input != st.session_state["selected_ticker"]:
-            st.session_state["selected_ticker"] = user_input.upper().strip()
+    # QR CODE SECTION
+    st.markdown("### 📲 Scan to Pay")
+    col_qr, col_info = st.columns([1, 2])
     
-    with col_time:
-        interval_map = {"1 Day": "1d", "1 Week": "1wk", "15 Mins": "15m"}
-        time_sel = st.selectbox("Timeframe", list(interval_map.keys()))
+    with col_qr:
+        if os.path.exists("qrcode.jpg"): st.image("qrcode.jpg", caption="Scan with Any UPI App", width=200)
+        else: st.warning("⚠️ Admin: Upload 'qrcode.jpg' to GitHub")
+            
+    with col_info:
+        st.markdown("""
+        1. Select plan (₹100, ₹279, or ₹1000).
+        2. Scan QR or pay to **lakshyazzzshah@gmail.com**
+        3. **Click the button below** to notify Admin.
+        """)
+        
+        # THE NOTIFICATION BUTTON
+        if st.button("✅ I Have Made Payment", type="primary"):
+            if request_activation(st.session_state["username"]):
+                st.session_state["subscription_status"] = "Pending"
+                st.success("Admin Notified! We will activate your account shortly.")
+                st.rerun()
+            else:
+                st.error("Error connecting to server.")
+        
+    if st.button("Log Out"): logout()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def main_app():
+    if "data_loaded" not in st.session_state:
+        data = load_user_data(st.session_state["username"])
+        if data:
+            st.session_state["balance"] = data["Balance"]
+            st.session_state["watchlist"] = data["Watchlist"]
+            st.session_state["portfolio"] = data["Portfolio"]
+        st.session_state["data_loaded"] = True
+        
+    if "selected_ticker" not in st.session_state: st.session_state["selected_ticker"] = "RELIANCE.NS"
+
+    def save_state():
+        save_user_data(st.session_state["username"], st.session_state["balance"], st.session_state["watchlist"], st.session_state["portfolio"])
+
+    # HEADER
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    c1, c2 = st.columns([3, 1])
+    c1.title(f"👋 Hi, {st.session_state['username']}")
+    c1.caption("Pro Stock AI • Premium Member")
+    c2.metric("Wallet", f"₹{st.session_state['balance']:,.0f}")
+    if c2.button("Log Out"): logout()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # SEARCH
+    c_search, c_btn = st.columns([4, 1])
+    query = c_search.text_input("Search Ticker", st.session_state["selected_ticker"], label_visibility="collapsed")
+    if c_btn.button("🔍", type="primary"):
+        st.session_state["selected_ticker"] = query.upper().strip()
+        st.rerun()
 
     current_stock = st.session_state["selected_ticker"]
     
-    if st.button("⭐ Add Current Stock to Watchlist"):
-        if current_stock not in st.session_state["watchlist"]:
-            st.session_state["watchlist"].append(current_stock)
+    # ANALYSIS
+    try:
+        stock = yf.Ticker(current_stock)
+        info = stock.info
+        price = info.get("currentPrice", 0)
+        score = 0
+        reasons = []
+        if info.get("returnOnEquity", 0) > 0.15: score += 20; reasons.append("✅ High Efficiency (ROE)")
+        if info.get("grossMargins", 0) > 0.40: score += 20; reasons.append("✅ Strong Brand (High Margins)")
+        if info.get("dividendYield", 0) > 0.015: score += 15; reasons.append("✅ Pays Dividends")
+        if info.get("heldPercentInstitutions", 0) > 0.40: score += 15; reasons.append("✅ Institutional Trust")
+        if info.get("beta", 1.5) < 1.2: score += 10; reasons.append("✅ Low Volatility")
+        if info.get("trailingPE", 0) < 25: score += 20; reasons.append("✅ Good Valuation")
+        name = info.get("longName", current_stock)
+    except: score, price, name, reasons = 0, 0, "Not Found", ["Invalid Ticker"]
+
+    # SCORE CARD
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    col_a, col_b = st.columns([2, 3])
+    color = "#00FF7F" if score >= 80 else "#FFD700" if score >= 50 else "#FF4B4B"
+    with col_a:
+        st.markdown(f'<p class="score-title">AI VERDICT</p><p class="score-badge" style="color: {color};">{score}</p><p style="text-align:center; color:{color}; font-weight:bold;">/ 100</p>', unsafe_allow_html=True)
+    with col_b:
+        st.subheader(name)
+        st.metric("Price", f"₹{price:,.2f}")
+        if score >= 80: st.success("Strong Buy")
+        elif score >= 50: st.warning("Hold")
+        else: st.error("Avoid")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    with st.expander("See Analysis Details"):
+        for r in reasons: st.write(r)
+    
+    # TRADING
+    st.markdown("### ⚡ Trade Actions")
+    st.markdown('<div class="css-card">', unsafe_allow_html=True)
+    c_qty, c_buy, c_sell = st.columns([1, 2, 2])
+    qty = c_qty.number_input("Qty", 1, value=10, label_visibility="collapsed")
+    if c_buy.button("🟢 BUY", use_container_width=True):
+        cost = qty * price
+        if st.session_state['balance'] >= cost:
+            st.session_state['balance'] -= cost
+            port = st.session_state['portfolio']
+            if current_stock in port:
+                old = port[current_stock]
+                new_avg = ((old['qty'] * old['avg_price']) + cost) / (old['qty'] + qty)
+                port[current_stock] = {'qty': old['qty'] + qty, 'avg_price': new_avg}
+            else: port[current_stock] = {'qty': qty, 'avg_price': price}
             save_state()
-            st.success(f"Added {current_stock}!")
+            st.success("Bought!")
             st.rerun()
+        else: st.error("No Funds")
+    if c_sell.button("🔴 SELL", use_container_width=True):
+        port = st.session_state['portfolio']
+        if current_stock in port and port[current_stock]['qty'] >= qty:
+            st.session_state['balance'] += (qty * price)
+            port[current_stock]['qty'] -= qty
+            if port[current_stock]['qty'] == 0: del port[current_stock]
+            save_state()
+            st.success("Sold!")
+            st.rerun()
+        else: st.error("No Shares")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # PORTFOLIO
+    if st.session_state["portfolio"]:
+        st.markdown("### 🎒 Your Holdings")
+        for t, d in st.session_state["portfolio"].items():
+            live_p = yf.Ticker(t).history(period="1d")['Close'].iloc[-1]
+            pl = (live_p - d['avg_price']) * d['qty']
+            pl_color = "#00FF7F" if pl >= 0 else "#FF4B4B"
+            st.markdown(f'<div style="background:#1E2130; padding:15px; border-radius:12px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;"><div><span style="font-weight:bold; font-size:18px;">{t}</span><br><span style="color:#A0A5B5; font-size:12px;">{d["qty"]} Shares</span></div><div style="text-align:right;"><span style="font-weight:bold; font-size:18px; color:{pl_color}">₹{pl:,.0f}</span></div></div>', unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Chart & Techs", "🏢 Fundamentals", "💼 Paper Trading", "🆚 Compare"])
-
-    with tab1:
-        try:
-            period = "5d" if interval_map[time_sel] == "15m" else "1y"
-            stock = yf.Ticker(current_stock)
-            df = stock.history(period=period, interval=interval_map[time_sel])
-            
-            if not df.empty:
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-
-                df['SMA_50'] = df['Close'].rolling(window=50).mean()
-                df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-                df['RSI'] = calculate_rsi_series(df['Close'])
-                df['Support'] = df['Low'].rolling(window=20).min()
-                df['Resistance'] = df['High'].rolling(window=20).max()
-
-                show_sr = st.checkbox("Show Auto-Support & Resistance Lines", value=True)
-                
-                fig = go.Figure()
-                fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"))
-                
-                if interval_map[time_sel] == "1d":
-                    fig.add_trace(go.Scatter(x=df.index, y=df['SMA_50'], line=dict(color='orange'), name="50 SMA"))
-                else:
-                    fig.add_trace(go.Scatter(x=df.index, y=df['EMA_20'], line=dict(color='purple'), name="20 EMA"))
-                
-                if show_sr:
-                    fig.add_trace(go.Scatter(x=df.index, y=df['Support'], line=dict(color='green', dash='dot'), name="Support"))
-                    fig.add_trace(go.Scatter(x=df.index, y=df['Resistance'], line=dict(color='red', dash='dot'), name="Resistance"))
-
-                fig.update_layout(height=600, xaxis_rangeslider_visible=False, title=f"{current_stock} Analysis")
-                st.plotly_chart(fig, use_container_width=True)
-                
-                csv = df.to_csv().encode('utf-8')
-                st.download_button("📥 Download Data as CSV", csv, f"{current_stock}_data.csv", "text/csv")
-            else:
-                st.error("Stock not found.")
-        except Exception as e:
-            st.error(f"Chart Error: {e}")
-
-    with tab2:
-        fund_data = get_fundamentals(current_stock)
-        if fund_data:
-            c1, c2, c3, c4 = st.columns(4)
-            mcap = fund_data["Market Cap"]
-            mcap_fmt = f"₹{mcap/10000000:,.0f} Cr" if isinstance(mcap, (int, float)) else "N/A"
-            c1.metric("Market Cap", mcap_fmt)
-            c2.metric("P/E Ratio", f"{fund_data['P/E Ratio']}")
-            c3.metric("52W High", f"₹{fund_data['52W High']}")
-            c4.metric("Sector", f"{fund_data['Sector']}")
-            st.write("### Business Summary")
-            st.write(fund_data["Business Summary"])
-            st.write("### 📰 Latest News")
-            news = get_google_news(current_stock)
-            for n in news:
-                st.write(f"**[{n.title}]({n.link})**")
-        else:
-            st.warning("Fundamental data not available.")
-
-    with tab3:
-        st.subheader(f"💼 Paper Trading: {current_stock}")
-        st.write(f"**Available Cash:** ₹{st.session_state['balance']:,.2f}")
+    # --- ADMIN PANEL (Only for 'arun') ---
+    if st.session_state["username"] == "arun":
+        st.divider()
+        st.markdown("### 👑 Admin: Manage Users")
+        st.markdown('<div class="css-card">', unsafe_allow_html=True)
         
-        try:
-            live_price = yf.Ticker(current_stock).history(period="1d")['Close'].iloc[-1]
-            st.metric("Current Market Price", f"₹{live_price:,.2f}")
-            col_buy, col_sell = st.columns(2)
+        client = get_client()
+        sheet = client.open("Stock_App_DB").worksheet("Users")
+        data = sheet.get_all_records()
+        df = pd.DataFrame(data)
+        
+        # Filter only Pending requests
+        pending_users = df[df['Status'] == 'Pending']
+        
+        if not pending_users.empty:
+            st.error(f"🔔 You have {len(pending_users)} Pending Payments!")
+            st.dataframe(pending_users[["Username", "Status"]], use_container_width=True)
             
-            with col_buy:
-                buy_qty = st.number_input("Buy Quantity", min_value=1, value=10, key="b_qty")
-                cost = buy_qty * live_price
-                if st.button(f"🟢 BUY {buy_qty} Qty"):
-                    if st.session_state['balance'] >= cost:
-                        st.session_state['balance'] -= cost
-                        if current_stock in st.session_state['portfolio']:
-                            old_qty = st.session_state['portfolio'][current_stock]['qty']
-                            old_avg = st.session_state['portfolio'][current_stock]['avg_price']
-                            new_avg = ((old_qty * old_avg) + cost) / (old_qty + buy_qty)
-                            st.session_state['portfolio'][current_stock] = {'qty': old_qty + buy_qty, 'avg_price': new_avg}
-                        else:
-                            st.session_state['portfolio'][current_stock] = {'qty': buy_qty, 'avg_price': live_price}
-                        
-                        save_state()
-                        st.success(f"Bought {buy_qty} shares!")
-                        st.rerun()
-                    else:
-                        st.error("Insufficient Funds!")
+            # Simple approval form
+            u_to_approve = st.selectbox("Select User to Approve", pending_users['Username'].unique())
+            if st.button(f"✅ Approve Payment for {u_to_approve}"):
+                if activate_user(u_to_approve):
+                    st.success(f"{u_to_approve} is now Active!")
+                    st.rerun()
+                else: st.error("Failed to update.")
+        else:
+            st.success("No pending payments.")
+            st.write("All Users:")
+            st.dataframe(df[["Username", "Status"]], use_container_width=True)
+            
+        st.markdown('</div>', unsafe_allow_html=True)
 
-            with col_sell:
-                sell_qty = st.number_input("Sell Quantity", min_value=1, value=10, key="s_qty")
-                if st.button(f"🔴 SELL {sell_qty} Qty"):
-                    if current_stock in st.session_state['portfolio'] and st.session_state['portfolio'][current_stock]['qty'] >= sell_qty:
-                        revenue = sell_qty * live_price
-                        st.session_state['balance'] += revenue
-                        remaining = st.session_state['portfolio'][current_stock]['qty'] - sell_qty
-                        if remaining == 0:
-                            del st.session_state['portfolio'][current_stock]
-                        else:
-                            st.session_state['portfolio'][current_stock]['qty'] = remaining
-                        
-                        save_state()
-                        st.success(f"Sold {sell_qty} shares!")
-                        st.rerun()
-                    else:
-                        st.error("Not enough shares.")
-
-            st.divider()
-            st.subheader("Your Holdings")
-            if st.session_state['portfolio']:
-                p_data = []
-                total_val = 0
-                for t, data in st.session_state['portfolio'].items():
-                    curr = yf.Ticker(t).history(period="1d")['Close'].iloc[-1]
-                    val = data['qty'] * curr
-                    p_loss = (curr - data['avg_price']) * data['qty']
-                    total_val += val
-                    p_data.append({
-                        "Stock": t, "Qty": data['qty'], "Avg Buy": f"₹{data['avg_price']:.1f}",
-                        "Current": f"₹{curr:.1f}", "Current Value": f"₹{val:.1f}", "P/L": f"₹{p_loss:.1f}"
-                    })
-                st.dataframe(pd.DataFrame(p_data))
-                st.metric("Total Portfolio Value", f"₹{total_val:,.2f}")
-
-        except Exception as e:
-            st.error("Could not fetch live price.")
-
-    with tab4:
-        st.subheader("🆚 Stock Comparison Tool")
-        TOP_STOCKS = [
-        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS",
-        "HINDUNILVR.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "KOTAKBANK.NS",
-        "LICI.NS", "LT.NS", "AXISBANK.NS", "HCLTECH.NS", "ASIANPAINT.NS",
-        "MARUTI.NS", "TITAN.NS", "SUNPHARMA.NS", "ULTRACEMCO.NS", "BAJFINANCE.NS",
-        "TATAMOTORS.NS", "ADANIENT.NS", "WIPRO.NS", "NTPC.NS", "POWERGRID.NS",
-        "ONGC.NS", "JSWSTEEL.NS", "TATASTEEL.NS", "COALINDIA.NS", "ZOMATO.NS"
-        ]
-        compare_stock = st.selectbox("Compare With:", TOP_STOCKS)
-        if st.button("Compare Performance"):
-            try:
-                c_data = yf.download([current_stock, compare_stock], period="1y", progress=False)['Close']
-                c_data = c_data / c_data.iloc[0] * 100
-                fig_comp = go.Figure()
-                fig_comp.add_trace(go.Scatter(x=c_data.index, y=c_data[current_stock], name=current_stock))
-                fig_comp.add_trace(go.Scatter(x=c_data.index, y=c_data[compare_stock], name=compare_stock))
-                st.plotly_chart(fig_comp, use_container_width=True)
-            except Exception as e:
-                st.error(f"Comparison Error: {e}")
+# --- 4. NAVIGATION ---
+if st.session_state["page"] == "welcome":
+    welcome_page()
+elif st.session_state["page"] == "login":
+    login_page()
+elif st.session_state["page"] == "payment":
+    payment_page()
+elif st.session_state["page"] == "app" and st.session_state["logged_in"]:
+    if st.session_state["subscription_status"] == "Active": main_app()
+    else: payment_page()
+else:
+    welcome_page()
