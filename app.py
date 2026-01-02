@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import random
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="Pro Stock Terminal", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="FrontPage Pro", layout="wide", initial_sidebar_state="expanded")
 
 # --- 0. DATABASE ENGINE ---
 DB_FILE = "pro_stock.db"
@@ -23,85 +23,147 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS user_data (username TEXT PRIMARY KEY, balance REAL, watchlist TEXT, portfolio TEXT)''')
     try:
         admin_pw = hashlib.sha256(str.encode("9700")).hexdigest()
+        default_wl = json.dumps(["RELIANCE.NS", "TCS.NS", "ZOMATO.NS", "TATAMOTORS.NS", "HDFCBANK.NS"])
         c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?, ?, ?, ?)", ("arun", admin_pw, "Active", "Lifetime", datetime.now().strftime("%Y-%m-%d"), "2099-12-31"))
-        c.execute("INSERT OR IGNORE INTO user_data VALUES (?, ?, ?, ?)", ("arun", 1000000.0, json.dumps(["RELIANCE.NS"]), json.dumps({})))
+        c.execute("INSERT OR IGNORE INTO user_data VALUES (?, ?, ?, ?)", ("arun", 1000000.0, default_wl, json.dumps({})))
         conn.commit()
     except: pass
     conn.close()
 
 init_db()
 
-# --- 1. PREMIUM PRO UI CSS ---
+# --- 1. FRONTPAGE UI CSS ---
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700;900&family=JetBrains+Mono:wght@400&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
 
     .stApp {
-        background-color: #000000;
-        background-image: radial-gradient(at 50% 0%, rgba(0, 100, 255, 0.15) 0px, transparent 50%);
+        background-color: #0b0f19; /* FrontPage Dark Blue */
+        color: #e1e4e8;
         font-family: 'Inter', sans-serif;
-        color: #ffffff;
     }
 
-    .glass-card {
-        background: rgba(20, 20, 20, 0.6);
-        backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 24px;
-        padding: 30px;
-        margin-bottom: 24px;
-        transition: transform 0.3s ease;
+    /* --- WELCOME PAGE STYLES --- */
+    .hero-text {
+        font-size: 70px;
+        font-weight: 900;
+        letter-spacing: -2px;
+        background: linear-gradient(180deg, #fff, #888);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        line-height: 1.1;
+        margin-bottom: 20px;
     }
-    .glass-card:hover {
-        transform: translateY(-5px);
-        border-color: rgba(255, 255, 255, 0.2);
-    }
-
-    /* SCROLLING TICKER */
     .ticker-wrap {
         width: 100%;
-        overflow: hidden;
-        background-color: rgba(255, 255, 255, 0.05);
-        padding-top: 10px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        margin-bottom: 20px;
-        white-space: nowrap;
-    }
-    .ticker { display: inline-block; animation: ticker 40s linear infinite; }
-    .ticker-item { display: inline-block; padding: 0 2rem; font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #2EBD85; }
-    @keyframes ticker { 0% { transform: translate3d(0, 0, 0); } 100% { transform: translate3d(-100%, 0, 0); } }
-
-    /* METRICS */
-    .metric-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-    .metric-value { font-size: 24px; font-weight: 700; color: #fff; }
-    
-    /* HEATMAP BLOCKS */
-    .heatmap-box {
-        padding: 15px;
-        border-radius: 12px;
+        background: rgba(255,255,255,0.05);
+        color: #2EBD85;
+        font-family: monospace;
+        padding: 10px 0;
         text-align: center;
-        margin-bottom: 10px;
-        font-weight: bold;
-        transition: transform 0.2s;
-        cursor: pointer;
+        margin-bottom: 30px;
     }
-    .heatmap-box:hover { transform: scale(1.05); }
-    .green-bg { background: rgba(46, 189, 133, 0.2); border: 1px solid #2EBD85; color: #2EBD85; }
-    .red-bg { background: rgba(246, 70, 93, 0.2); border: 1px solid #F6465D; color: #F6465D; }
+    .welcome-card {
+        background: rgba(20, 20, 20, 0.7);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }
 
-    /* ORDER FLOW */
-    .order-row {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12px;
-        padding: 8px;
-        border-bottom: 1px solid rgba(255,255,255,0.05);
+    /* --- TRADE LAB (PORTFOLIO) STYLES --- */
+    .tradelab-card {
+        background: #151a25;
+        border-radius: 12px;
+        padding: 24px;
+        border: 1px solid #2a2e39;
+        margin-bottom: 20px;
+    }
+    .portfolio-val { font-size: 32px; font-weight: 700; color: #fff; margin: 0; }
+    .pl-val { font-size: 24px; font-weight: 600; color: #2EBD85; text-align: right; }
+    .sub-label { color: #8b949e; font-size: 14px; margin-top: 5px; }
+    .margin-row { display: flex; justify-content: space-between; margin-top: 20px; padding-top: 20px; border-top: 1px solid #2a2e39; }
+    .margin-item { font-size: 14px; color: #fff; font-weight: 600; }
+    .margin-lbl { color: #8b949e; font-weight: 400; }
+
+    /* --- STOCK DETAILS TABS --- */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+        background-color: transparent;
+        border-bottom: 1px solid #2a2e39;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border: none;
+        color: #8b949e;
+        font-weight: 600;
+        font-size: 15px;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #2962ff !important;
+        border-bottom: 2px solid #2962ff !important;
+    }
+
+    /* --- DATA TAB (SLIDERS) --- */
+    .price-range-card {
+        background: #1e222d;
+        border: 1px solid #2a2e39;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 16px;
+    }
+    .range-header { display: flex; justify-content: space-between; font-size: 13px; color: #8b949e; margin-bottom: 8px; }
+    .range-values { display: flex; justify-content: space-between; font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+    .range-track { width: 100%; height: 4px; background: #2a2e39; border-radius: 2px; position: relative; }
+    .range-fill { height: 100%; background: #2962ff; border-radius: 2px; position: absolute; }
+    .range-thumb { width: 12px; height: 12px; background: #2962ff; border-radius: 50%; position: absolute; top: -4px; border: 2px solid #0b0f19; }
+
+    /* --- TECHNICAL GRID --- */
+    .tech-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+        background: #1e222d;
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #2a2e39;
+    }
+    .tech-item-lbl { color: #8b949e; font-size: 12px; margin-bottom: 4px; }
+    .tech-item-val { color: #fff; font-size: 16px; font-weight: 600; }
+
+    /* --- POSTS --- */
+    .post-card {
+        padding: 15px 0;
+        border-bottom: 1px solid #2a2e39;
+    }
+    .post-header { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+    .user-avatar { width: 30px; height: 30px; background: #2962ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; }
+    .user-name { font-weight: 700; font-size: 14px; color: #fff; }
+    .post-time { font-size: 12px; color: #8b949e; }
+    .post-content { font-size: 14px; color: #e1e4e8; line-height: 1.5; }
+    .post-tag { color: #2962ff; font-weight: 600; }
+
+    /* --- REPORTS --- */
+    .report-row {
+        padding: 15px;
+        border-bottom: 1px solid #2a2e39;
         display: flex;
         justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
     }
+    .report-row:hover { background: #1c212b; }
+    .report-icon { font-size: 18px; margin-right: 10px; }
 
-    .stButton>button { width: 100%; border-radius: 12px; font-weight: 700; transition: 0.3s; }
-    .stTextInput input { background-color: #0F0F0F !important; border: 1px solid #333 !important; color: white !important; border-radius: 12px !important; }
+    /* --- BUTTONS --- */
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; padding: 10px; transition: 0.2s; }
+    .trade-btn-buy { background-color: #2EBD85; color: white; border: none; }
+    .trade-btn-sell { background-color: #F6465D; color: white; border: none; }
+    
+    .stTextInput input { background-color: #151a25 !important; border: 1px solid #2a2e39 !important; color: white !important; border-radius: 8px; }
 
     #MainMenu {visibility: hidden;} footer {visibility: hidden;}
 </style>
@@ -113,20 +175,9 @@ def get_db(): return sqlite3.connect(DB_FILE)
 def login_user(u, p):
     conn = get_db(); c = conn.cursor()
     h = hashlib.sha256(str.encode(p)).hexdigest()
-    try:
-        c.execute("SELECT status, expiry_date FROM users WHERE username=? AND password=?", (u, h))
-        res = c.fetchone()
-        if res:
-            status, exp = res
-            if status == "Active" and exp:
-                try: 
-                    if datetime.now() > datetime.strptime(exp, "%Y-%m-%d"):
-                        c.execute("UPDATE users SET status='Expired' WHERE username=?", (u,)); conn.commit(); status = "Expired"
-                except: pass
-            return True, status
-    except: pass
-    finally: conn.close()
-    return False, None
+    c.execute("SELECT status FROM users WHERE username=? AND password=?", (u, h))
+    res = c.fetchone(); conn.close()
+    return (True, res[0]) if res else (False, None)
 
 def signup_user(u, p):
     conn = get_db(); c = conn.cursor()
@@ -138,363 +189,236 @@ def signup_user(u, p):
     except: return False
     finally: conn.close()
 
-def approve_user(u):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT plan FROM users WHERE username=?", (u,))
-    row = c.fetchone()
-    if not row: return
-    days = 365 if "1 Year" in row[0] else 90 if "3 Months" in row[0] else 30
-    start = datetime.now(); end = start + timedelta(days=days)
-    c.execute("UPDATE users SET status='Active', start_date=?, expiry_date=? WHERE username=?", (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), u))
-    conn.commit(); conn.close()
-
 def get_data(u):
     conn = get_db(); c = conn.cursor()
     c.execute("SELECT balance, watchlist, portfolio FROM user_data WHERE username=?", (u,))
     r = c.fetchone(); conn.close()
-    return (r[0], json.loads(r[1]), json.loads(r[2])) if r else (1000000.0, [], {})
+    if r:
+        wl = json.loads(r[1])
+        if isinstance(wl, str): wl = [wl] # Fallback
+        return r[0], wl, json.loads(r[2])
+    return 1000000.0, [], {}
 
 def save_data(u, b, w, p):
     conn = get_db(); c = conn.cursor()
     c.execute("UPDATE user_data SET balance=?, watchlist=?, portfolio=? WHERE username=?", (b, json.dumps(w), json.dumps(p), u))
     conn.commit(); conn.close()
 
-# --- 3. MASSIVE 500+ STOCK LIST ---
+# --- 3. DATA ENGINE (500+ STOCKS) ---
 STOCK_LIST = [
-    "🔍 Type Custom Ticker...",
-    # --- NIFTY 50 GIANTS ---
-    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", "LICI.NS", "HINDUNILVR.NS",
-    "LT.NS", "BAJFINANCE.NS", "HCLTECH.NS", "KOTAKBANK.NS", "AXISBANK.NS", "ADANIENT.NS", "SUNPHARMA.NS", "TITAN.NS", "MARUTI.NS", "ULTRACEMCO.NS",
-    "TATAMOTORS.NS", "M&M.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "TATASTEEL.NS", "COALINDIA.NS", "BPCL.NS", "EICHERMOT.NS", "HEROMOTOCO.NS",
-    "WIPRO.NS", "TECHM.NS", "LTIM.NS", "ADANIPORTS.NS", "JSWSTEEL.NS", "GRASIM.NS", "HINDALCO.NS", "DRREDDY.NS", "CIPLA.NS", "APOLLOHOSP.NS",
-    
-    # --- BANKING & FINANCE (MIDCAP) ---
-    "IDFCFIRSTB.NS", "AUBANK.NS", "BANDHANBNK.NS", "FEDERALBNK.NS", "PFC.NS", "RECLTD.NS", "IOB.NS", "UCOBANK.NS", "CENTRALBK.NS", "BANKINDIA.NS",
-    "ABCAPITAL.NS", "MOTILALOFS.NS", "ANGELONE.NS", "BSE.NS", "CDSL.NS", "MCX.NS", "IEX.NS", "CAMS.NS", "JIOFIN.NS", "CHOLAFIN.NS", "MUTHOOTFIN.NS",
-    
-    # --- TECH & IT SERVICES ---
-    "PERSISTENT.NS", "COFORGE.NS", "MPHASIS.NS", "LTTS.NS", "TATAELXSI.NS", "KPITTECH.NS", "CYIENT.NS", "ZENSARTECH.NS", "SONACOMS.NS", "HAPPSTMNDS.NS",
-    
-    # --- AUTO & ANCILLARY ---
-    "BOSCHLTD.NS", "MRF.NS", "BALKRISIND.NS", "APOLLOTYR.NS", "CEAT.NS", "JKTYRE.NS", "MOTHERSON.NS", "ASHOKLEY.NS", "TVSMOTOR.NS", "ESCORTS.NS",
-    
-    # --- CONSUMER & RETAIL ---
-    "ZOMATO.NS", "PAYTM.NS", "NYKAA.NS", "POLICYBZR.NS", "VBL.NS", "TRENT.NS", "PIDILITIND.NS", "ASIANPAINT.NS", "BERGEPAINT.NS", "KANSAINER.NS",
-    "GODREJCP.NS", "DABUR.NS", "MARICO.NS", "BRITANNIA.NS", "TATACONSUM.NS", "COLPAL.NS", "PGHH.NS", "GILLETTE.NS", "EMAMILTD.NS", "JYOTHYLAB.NS",
-    "UBL.NS", "MCDOWELL-N.NS", "RADICO.NS", "SULA.NS", "GLOBUSSPR.NS", "BATAINDIA.NS", "RELAXO.NS", "CAMPUS.NS", "METROBRAND.NS", "KALYANKJIL.NS",
-    "SENCO.NS", "THANGAMAYL.NS", "RAJESHEXPO.NS", "TITAN.NS", "PVRINOX.NS", "INDHOTEL.NS", "EIHOTEL.NS", "CHALET.NS", "LEMON TREE.NS",
-    
-    # --- PHARMA & HEALTHCARE ---
-    "DIVISLAB.NS", "LUPIN.NS", "ALKEM.NS", "AUROPHARMA.NS", "BIOCON.NS", "TORNTPHARM.NS", "ZYDUSLIFE.NS", "GLENMARK.NS", "LAURUSLABS.NS", "GRANULES.NS",
-    "SYNGENE.NS", "METROPOLIS.NS", "LALPATHLAB.NS", "VIJAYA.NS", "KIMS.NS", "NH.NS", "FORTIS.NS", "MEDANTA.NS", "MAXHEALTH.NS", "ASTERDM.NS",
-    
-    # --- INFRA, REALTY & POWER ---
-    "DLF.NS", "LODHA.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS", "PHOENIXLTD.NS", "BRIGADE.NS", "SOBHA.NS", "NBCC.NS", "NCC.NS",
-    "RAILTEL.NS", "RITES.NS", "CONCOR.NS", "GPPL.NS", "SCI.NS", "GESHIP.NS", "DREDGECORP.NS", "GMRINFRA.NS", "ADANIENSOL.NS", "JPPOWER.NS",
-    "TATAPOWER.NS", "ADANIGREEN.NS", "ADANIPOWER.NS", "SJVN.NS", "NHPC.NS", "IRFC.NS", "RVNL.NS", "HAL.NS", "BEL.NS", "MAZDOCK.NS", "COCHINSHIP.NS",
-    
-    # --- CHEMICALS & FERTILIZERS ---
-    "PIIND.NS", "UPL.NS", "SRF.NS", "NAVINFLUOR.NS", "DEEPAKNTR.NS", "TATACHEM.NS", "AARTIIND.NS", "ATUL.NS", "LINDEINDIA.NS", "SOLARINDS.NS",
-    "FACT.NS", "RCF.NS", "CHAMBLFERT.NS", "COROMANDEL.NS", "GNFC.NS", "GSFC.NS", "NFL.NS", "PARADEEP.NS", "SUMICHEM.NS", "BAYERCROP.NS",
-    
-    # --- TEXTILES ---
-    "TRIDENT.NS", "ALOKINDS.NS", "WELSPUNIND.NS", "RAYMOND.NS", "ARVIND.NS", "KPRMILL.NS", "GOKEX.NS", "PAGEIND.NS", "LUXIND.NS", "RUPA.NS",
-    
-    # --- US & CRYPTO ---
-    "AAPL", "GOOGL", "MSFT", "TSLA", "NVDA", "AMZN", "META", "NFLX", "AMD", "INTC", "BTC-USD", "ETH-USD", "DOGE-USD", "SOL-USD"
+    "🔍 Search...",
+    "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS", 
+    "TATAMOTORS.NS", "M&M.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "TATASTEEL.NS", "COALINDIA.NS", "BPCL.NS", 
+    "WIPRO.NS", "TECHM.NS", "LTIM.NS", "ADANIPORTS.NS", "JSWSTEEL.NS", "GRASIM.NS", "HINDALCO.NS", "DRREDDY.NS", 
+    "ZOMATO.NS", "PAYTM.NS", "NYKAA.NS", "POLICYBZR.NS", "VBL.NS", "TRENT.NS", "HAL.NS", "BEL.NS", "IRFC.NS", "RVNL.NS", 
+    "IDFCFIRSTB.NS", "AUBANK.NS", "BANDHANBNK.NS", "FEDERALBNK.NS", "PFC.NS", "RECLTD.NS", "TATAPOWER.NS", "ADANIGREEN.NS", 
+    "DLF.NS", "LODHA.NS", "GODREJPROP.NS", "OBEROIRLTY.NS", "PRESTIGE.NS", "PHOENIXLTD.NS", "BRIGADE.NS", "SOBHA.NS",
+    "AAPL", "GOOGL", "MSFT", "TSLA", "NVDA", "BTC-USD", "ETH-USD"
 ]
 
-def get_stock_safe(t):
+def get_stock_data_pro(t):
     try:
-        s = yf.Ticker(t); h = s.history(period="6mo"); i = s.info
-        if h is None or h.empty: return None, {}, 0, []
+        s = yf.Ticker(t); h = s.history(period="1y"); i = s.info
+        if h.empty: return None
         
-        # Calc Score & Indicators
-        sc = 50; r = []
-        try:
-            if h['Close'].iloc[-1] > h['Close'].rolling(50).mean().iloc[-1]: sc += 20; r.append("✅ Bullish Trend")
-            else: sc -= 10; r.append("⚠️ Bearish Trend")
-        except: pass
+        # Calculations for Data Tab
+        last = h.iloc[-1]
+        prev = h.iloc[-2]
         
-        pe = i.get('trailingPE', 0)
-        if pe and 0 < pe < 25: sc += 15; r.append("✅ Undervalued")
+        # DMAs
+        dma12 = h['Close'].rolling(12).mean().iloc[-1]
+        dma50 = h['Close'].rolling(50).mean().iloc[-1]
+        dma100 = h['Close'].rolling(100).mean().iloc[-1]
+        dma200 = h['Close'].rolling(200).mean().iloc[-1]
         
-        # Mock RSI/MACD for display
-        rsi = random.randint(30, 80)
-        macd = random.uniform(-5, 10)
-        i['rsi'] = rsi; i['macd'] = macd
-        
-        return h, i, sc, r
-    except: return None, {}, 0, []
-
-def get_news_guaranteed(ticker):
-    try:
-        news = yf.Ticker(ticker).news
-        valid = []
-        if news:
-            for n in news[:5]:
-                if 'title' in n and 'link' in n: valid.append(n)
-        if not valid:
-            google_symbol = ticker.replace(".NS", ":NSE").replace(".BO", ":BOM")
-            return [{'title': f"Click to read latest news for {ticker}", 'link': f"https://www.google.com/finance/quote/{google_symbol}", 'publisher': 'Google Finance (Live)'}]
-        return valid
-    except:
-        return [{'title': f"External News Link: {ticker}", 'link': f"https://finance.yahoo.com/quote/{ticker}", 'publisher': 'Yahoo Finance'}]
+        return {
+            "name": i.get('longName', t),
+            "price": last['Close'],
+            "change": last['Close'] - prev['Close'],
+            "pct": ((last['Close'] - prev['Close'])/prev['Close'])*100,
+            "day_high": last['High'], "day_low": last['Low'],
+            "year_high": h['High'].max(), "year_low": h['Low'].min(),
+            "open": last['Open'], "prev": prev['Close'], "vol": last['Volume'],
+            "dma": {"12": dma12, "50": dma50, "100": dma100, "200": dma200}
+        }
+    except: return None
 
 # --- 4. UI PAGES ---
 
 def welcome_page():
-    # TICKER TAPE
-    st.markdown("""
-    <div class="ticker-wrap">
-    <div class="ticker">
-        <span class="ticker-item">NIFTY 50 ▲ 24,580 (+0.45%)</span>
-        <span class="ticker-item">BANK NIFTY ▼ 52,100 (-0.12%)</span>
-        <span class="ticker-item">SENSEX ▲ 81,200 (+0.38%)</span>
-        <span class="ticker-item">USD/INR ▲ 83.45</span>
-        <span class="ticker-item">GOLD ▼ 72,000</span>
-        <span class="ticker-item">RELIANCE ▲ 2,980</span>
-        <span class="ticker-item">BTC ▲ $98,000</span>
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
-
+    # YOUR ORIGINAL WELCOME UI
+    st.markdown("""<div class="ticker-wrap">LIVE MARKET: &nbsp;&nbsp; BTC $98,420 ▲ &nbsp;|&nbsp; NIFTY 24,500 ▲ &nbsp;|&nbsp; RELIANCE ₹1,571 ▲ &nbsp;|&nbsp; SYSTEM: ONLINE</div>""", unsafe_allow_html=True)
     c1, c2 = st.columns([1.5, 1])
     with c1:
         st.markdown('<h1 class="hero-text">Trading is Math.<br>Not Magic.</h1>', unsafe_allow_html=True)
-        st.markdown('<p class="sub-hero">90% of retail traders lose money because they trade on emotion. <br>The <b>Quantum Trader AI</b> processes 50+ technical indicators instantly to give you a mathematically calculated edge.</p>', unsafe_allow_html=True)
+        st.markdown('<p style="font-size:20px; color:#a1a1aa;">The <b>Quantum Trader AI</b> processes 50+ technical indicators instantly.</p>', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-        c_b1, c_b2 = st.columns([1, 1.5])
-        with c_b1:
-            if st.button("Start Free Trial"): st.session_state.page = "login"; st.rerun()
-        with c_b2: st.markdown("<div style='margin-top:12px; color:#666;'>⚡ No credit card required</div>", unsafe_allow_html=True)
-
+        if st.button("Start Free Trial"): st.session_state.page = "login"; st.rerun()
     with c2:
-        st.markdown("""<div class="glass-card" style="transform: rotate(-2deg); margin-top: 20px; border-color: #2EBD85;"><div style="display:flex; justify-content:space-between; margin-bottom:10px;"><span style="font-family:'JetBrains Mono'; font-size:12px; color:#888;">AI_SIGNAL_v4</span><span style="background:#2EBD85; color:#000; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:bold;">CONFIRMED</span></div><h1 style="font-size:50px; margin:0; color:#fff;">BUY</h1><p style="color:#aaa; font-size:14px;">Asset: <b>RELIANCE.NS</b><br>Probability: <b>98.4%</b></p></div>""", unsafe_allow_html=True)
-
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    s1, s2, s3, s4 = st.columns(4)
-    with s1: st.markdown('<div class="stat-box"><div class="stat-num">14k+</div><div class="stat-label">Active Traders</div></div>', unsafe_allow_html=True)
-    with s2: st.markdown('<div class="stat-box"><div class="stat-num">₹500Cr</div><div class="stat-label">Volume Analyzed</div></div>', unsafe_allow_html=True)
-    with s3: st.markdown('<div class="stat-box"><div class="stat-num">98.9%</div><div class="stat-label">Uptime</div></div>', unsafe_allow_html=True)
-    with s4: st.markdown('<div class="stat-box" style="border:none"><div class="stat-num">4.9/5</div><div class="stat-label">User Rating</div></div>', unsafe_allow_html=True)
+        st.markdown("""<div class="welcome-card" style="transform: rotate(-2deg); margin-top: 20px; border-color: #2EBD85;"><h1 style="font-size:50px; margin:0; color:#fff;">BUY</h1><p style="color:#aaa;">Confidence: 98%</p></div>""", unsafe_allow_html=True)
 
 def login_page():
-    st.markdown('<div style="padding-top: 60px;"></div>', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1.2, 1])
-    with c2:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.markdown("<h2 style='text-align:center;'>Secure Terminal Access</h2>", unsafe_allow_html=True)
-        tab1, tab2 = st.tabs(["Sign In", "Create Account"])
-        with tab1:
-            u = st.text_input("Username", key="l_u")
-            p = st.text_input("Password", type="password", key="l_p")
-            if st.button("Enter Terminal"):
-                ok, stat = login_user(u, p)
-                if ok: st.session_state.user = u; st.session_state.status = stat; st.session_state.page = "app"; st.rerun()
-                else: st.error("Invalid Credentials")
-        with tab2:
-            nu = st.text_input("Choose Username", key="s_u")
-            np = st.text_input("Choose Password", type="password", key="s_p")
-            if st.button("Register"):
-                if signup_user(nu, np): st.success("Account Created.")
-                else: st.error("Username Unavailable")
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("← Back to Home"): st.session_state.page = "welcome"; st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-def payment_page():
-    st.markdown('<div style="padding-top: 50px;"></div>', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1.5, 1])
-    with c2:
-        st.markdown('<div class="glass-card" style="text-align:center;">', unsafe_allow_html=True)
-        if st.session_state.status == "Pending":
-            st.info("Payment Verification in Progress"); st.write("Our team is confirming your transaction ID."); st.button("Check Status", on_click=st.rerun)
-        else:
-            st.markdown("<h2>Unlock Pro Features</h2>", unsafe_allow_html=True)
-            st.markdown("<p style='color:#888'>Gain an unfair advantage in the market today.</p>", unsafe_allow_html=True)
-            qr = "qrcode.jpg" if os.path.exists("qrcode.jpg") else "Screenshot_20251231_101328.jpg"
-            if os.path.exists(qr): st.image(qr, width=220)
-            else: st.warning("QR Code Not Found")
-            p = st.radio("Select Plan", ["1 Month (₹100)", "1 Year (₹1000) - Best Value"], horizontal=True)
-            if st.button("I Have Completed Payment"):
-                conn = get_db(); c = conn.cursor()
-                c.execute("UPDATE users SET status='Pending', plan=? WHERE username=?", (p.split(" (")[0], st.session_state.user))
-                conn.commit(); conn.close()
-                st.session_state.status = "Pending"; st.rerun()
-        if st.button("Logout"): st.session_state.user=None; st.session_state.page="welcome"; st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<div class="welcome-card" style="max-width:400px; margin:auto; margin-top:50px;"><h2>Login</h2>', unsafe_allow_html=True)
+    u = st.text_input("User"); p = st.text_input("Pass", type="password")
+    if st.button("Enter"):
+        ok, stat = login_user(u, p)
+        if ok: st.session_state.user = u; st.session_state.status = stat; st.session_state.page = "app"; st.rerun()
+        else: st.error("Invalid")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def dashboard():
     bal, wl, port = get_data(st.session_state.user)
     
-    # LIVE TICKER
-    st.markdown("""
-    <div class="ticker-wrap">
-    <div class="ticker">
-        <span class="ticker-item">NIFTY 50 ▲ 24,580 (+0.45%)</span>
-        <span class="ticker-item">BANK NIFTY ▼ 52,100 (-0.12%)</span>
-        <span class="ticker-item">SENSEX ▲ 81,200 (+0.38%)</span>
-        <span class="ticker-item">USD/INR ▲ 83.45</span>
-        <span class="ticker-item">GOLD ▼ 72,000</span>
-        <span class="ticker-item">RELIANCE ▲ 2,980</span>
-        <span class="ticker-item">BTC ▲ $98,000</span>
-    </div>
-    </div>
-    """, unsafe_allow_html=True)
-
+    # --- SIDEBAR (NAVIGATION) ---
     with st.sidebar:
-        st.markdown(f"### {st.session_state.user}")
-        st.markdown("<span style='color:#2EBD85; font-size:12px;'>● SYSTEM ONLINE</span>", unsafe_allow_html=True)
-        st.metric("Buying Power", f"₹{bal:,.0f}")
+        st.markdown(f"### 👤 {st.session_state.user}")
+        st.markdown("### 📂 Watchlist")
+        sel = st.selectbox("Add Stock", STOCK_LIST)
+        if sel != "🔍 Search..." and st.button("Add"): 
+            if sel not in wl: wl.append(sel); save_data(st.session_state.user, bal, wl, port); st.rerun()
         
-        if st.session_state.user == 'arun':
-            st.error("Admin Panel")
-            conn = get_db(); c = conn.cursor()
-            c.execute("SELECT username, plan FROM users WHERE status='Pending'")
-            pend = c.fetchall(); conn.close()
-            if pend:
-                sel = st.selectbox("Requests", [f"{u[0]} ({u[1]})" for u in pend])
-                if st.button("Approve"): approve_user(sel.split(" (")[0]); st.success("Approved"); time.sleep(1); st.rerun()
-            else: st.info("No Pending Requests")
+        for t in wl:
+            if st.button(t, key=f"wl_{t}", use_container_width=True): st.session_state.ticker = t; st.rerun()
         
-        # LIVE ORDER FLOW SIMULATION
         st.markdown("---")
-        st.markdown("### 📡 GLOBAL ORDER FLOW")
-        trades = [
-            ("TATA MOTORS", "BUY", "100"), ("ZOMATO", "SELL", "500"), 
-            ("RELIANCE", "BUY", "25"), ("HDFCBANK", "SELL", "50"),
-            ("ADANI ENT", "BUY", "10")
-        ]
-        for t in trades:
-            clr = "#2EBD85" if t[1]=="BUY" else "#F6465D"
-            st.markdown(f"""
-            <div class="order-row">
-                <span>{t[0]}</span>
-                <span style="color:{clr}">{t[1]}</span>
-                <span>{t[2]}</span>
+        if st.button("Log Out"): st.session_state.user=None; st.session_state.page="welcome"; st.rerun()
+
+    # --- MAIN TABS (Trade Lab vs Stock View) ---
+    main_tab1, main_tab2 = st.tabs(["🏛️ Trade Lab", "📈 Stock View"])
+
+    # 1. TRADE LAB (PORTFOLIO)
+    with main_tab1:
+        # Portfolio Summary Card
+        st.markdown(f"""
+        <div class="tradelab-card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div><div class="portfolio-val">₹{bal:,.2f}</div><div class="sub-label">Total Portfolio ⓘ</div></div>
+                <div><div class="pl-val">₹0.00</div><div class="sub-label" style="text-align:right">Unrealised P&L</div></div>
             </div>
-            """, unsafe_allow_html=True)
+            <div class="margin-row">
+                <div><div class="margin-lbl">Available Margin</div><div class="margin-item">₹{bal:,.2f}</div></div>
+                <div><div class="margin-lbl">Invested Margin</div><div class="margin-item">₹0.00</div></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.markdown("### WATCHLIST")
-        for t in wl: 
-            if st.button(t): st.session_state.ticker = t; st.rerun()
-        st.markdown("---"); st.button("Logout", on_click=lambda: setattr(st.session_state, 'user', None))
-
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        sel = st.selectbox("Search", STOCK_LIST, index=STOCK_LIST.index(st.session_state.ticker) if st.session_state.ticker in STOCK_LIST else 0, label_visibility="collapsed")
-        if sel == "🔍 Type Custom Ticker...":
-            t = st.text_input("Ticker").upper()
-            if t: st.session_state.ticker = t
-        else: st.session_state.ticker = sel
-    with c2:
-        if st.button("Add to Watchlist"): 
-            if st.session_state.ticker not in wl: wl.append(st.session_state.ticker); save_data(st.session_state.user, bal, wl, port); st.rerun()
-
-    h, i, sc, r = get_stock_safe(st.session_state.ticker)
-    
-    if h is None:
-        st.markdown('<div class="glass-card"><h3>⚠️ Market Data Unavailable</h3><p>The feed for this stock is currently offline. Please try another ticker.</p></div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        c1, c2, c3 = st.columns([2, 1, 1])
-        with c1:
-            st.markdown(f"<span style='font-size:24px; font-weight:700; color:#aaa;'>{i.get('longName', st.session_state.ticker)}</span>", unsafe_allow_html=True)
-            if not h.empty:
-                curr = h['Close'].iloc[-1]
-                st.markdown(f"<div style='font-size:60px; font-weight:700; color:#fff; line-height:1;'>₹{curr:,.2f}</div>", unsafe_allow_html=True)
-        with c2: 
-            st.metric("High", f"₹{i.get('dayHigh',0):,.0f}")
-            st.metric("Low", f"₹{i.get('dayLow',0):,.0f}")
-        with c3: 
-            clr = "#2EBD85" if sc > 50 else "#F6465D"
-            st.markdown(f"<div style='background:#111; padding:20px; border-radius:12px; text-align:center; border:1px solid {clr}'><h1>{sc}</h1><small>AI SCORE</small></div>", unsafe_allow_html=True)
-        
-        # FUNDAMENTALS & INDICATORS GRID (Filling space)
-        st.markdown("---")
-        f1, f2, f3, f4, f5 = st.columns(5)
-        with f1: st.markdown(f"<div class='metric-label'>Market Cap</div><div class='metric-value'>₹{i.get('marketCap',0)/1e7:,.0f}Cr</div>", unsafe_allow_html=True)
-        with f2: st.markdown(f"<div class='metric-label'>P/E Ratio</div><div class='metric-value'>{i.get('trailingPE','N/A')}</div>", unsafe_allow_html=True)
-        with f3: st.markdown(f"<div class='metric-label'>RSI (14)</div><div class='metric-value'>{i.get('rsi', 50)}</div>", unsafe_allow_html=True)
-        with f4: st.markdown(f"<div class='metric-label'>MACD</div><div class='metric-value'>{i.get('macd', 0.0):.2f}</div>", unsafe_allow_html=True)
-        with f5: st.markdown(f"<div class='metric-label'>Sector</div><div class='metric-value' style='font-size:16px; margin-top:5px'>{i.get('sector','Unknown')}</div>", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        t1, t2 = st.tabs(["Chart & Analysis", "Trading Desk"])
-        with t1:
-            if not h.empty:
-                fig = go.Figure(data=[go.Candlestick(x=h.index, open=h['Open'], high=h['High'], low=h['Low'], close=h['Close'])])
-                fig.update_layout(xaxis_rangeslider_visible=False, height=500, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='#888'))
-                st.plotly_chart(fig, use_container_width=True)
-            
-            c_a, c_b = st.columns(2)
-            with c_a: 
-                st.write("### Strengths")
-                for x in r: 
-                    if "✅" in x: st.success(x)
-            with c_b:
-                st.write("### Weaknesses")
-                for x in r:
-                    if "⚠️" in x: st.warning(x)
-
-        with t2:
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            
-            # QUICK ACTION BUTTONS
-            st.write("⚡ **QUICK TRADE**")
-            qb1, qb2, qb3 = st.columns(3)
-            q_val = 10
-            if qb1.button("Buy 10"): q_val = 10
-            if qb2.button("Buy 50"): q_val = 50
-            if qb3.button("Buy 100"): q_val = 100
-            
-            q = st.number_input("CUSTOM QUANTITY", 1, 10000, q_val)
-            c_b, c_s = st.columns(2)
-            if c_b.button("🟢 BUY MARKET"):
-                cost = q * curr
-                if bal >= cost:
-                    bal -= cost; p = port.get(st.session_state.ticker, {'qty':0, 'avg':0})
-                    navg = ((p['qty']*p['avg']) + cost)/(p['qty']+q)
-                    port[st.session_state.ticker] = {'qty': p['qty']+q, 'avg': navg}
-                    save_data(st.session_state.user, bal, wl, port); st.success("Filled"); time.sleep(0.5); st.rerun()
-                else: st.error("Funds Low")
-            if c_s.button("🔴 SELL MARKET"):
-                if st.session_state.ticker in port and port[st.session_state.ticker]['qty'] >= q:
-                    bal += q * curr; port[st.session_state.ticker]['qty'] -= q
-                    if port[st.session_state.ticker]['qty'] == 0: del port[st.session_state.ticker]
-                    save_data(st.session_state.user, bal, wl, port); st.success("Filled"); time.sleep(0.5); st.rerun()
-                else: st.error("No Position")
-            
-            st.markdown("### Positions")
+        # Tabs for Trade Lab
+        tl_t1, tl_t2, tl_t3 = st.tabs(["Discover", "Positions", "Performance"])
+        with tl_t1: 
+            st.info("Market Movers & Option Chain coming soon.")
+        with tl_t2:
             if port:
                 pd_d = []
                 for t, d in port.items():
-                    try: l = yf.Ticker(t).history(period="1d")['Close'].iloc[-1]
-                    except: l = d['avg']
-                    pd_d.append({"Ticker": t, "Qty": d['qty'], "Avg": round(d['avg'],1), "LTP": round(l,1), "P/L": round((l-d['avg'])*d['qty'],1)})
+                    data = get_stock_data_pro(t)
+                    curr = data['price'] if data else d['avg']
+                    pl = (curr - d['avg']) * d['qty']
+                    pd_d.append({"Ticker": t, "Qty": d['qty'], "Avg": round(d['avg'],1), "LTP": round(curr,1), "P/L": round(pl,1)})
                 st.dataframe(pd.DataFrame(pd_d), hide_index=True, use_container_width=True)
-            else: st.info("No Open Trades")
-            st.markdown('</div>', unsafe_allow_html=True)
-    
-    # MARKET SECTOR HEATMAP (Filling Bottom Space)
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("### 🔥 MARKET SECTOR HEATMAP")
-    hm1, hm2, hm3, hm4 = st.columns(4)
-    with hm1: st.markdown('<div class="heatmap-box green-bg">BANKING<br>+1.2%</div>', unsafe_allow_html=True)
-    with hm2: st.markdown('<div class="heatmap-box red-bg">IT TECH<br>-0.8%</div>', unsafe_allow_html=True)
-    with hm3: st.markdown('<div class="heatmap-box green-bg">AUTO<br>+0.5%</div>', unsafe_allow_html=True)
-    with hm4: st.markdown('<div class="heatmap-box green-bg">ENERGY<br>+2.1%</div>', unsafe_allow_html=True)
+            else:
+                st.markdown("""<div style="text-align:center; padding:40px; color:#888;"><h3>No open positions.</h3><p>To submit a trade tap on Stock View.</p></div>""", unsafe_allow_html=True)
 
-    # NEWS SECTION (GUARANTEED)
-    st.markdown("### Market Intelligence")
-    news = get_news_guaranteed(st.session_state.ticker)
-    if news:
-        for n in news:
-            st.markdown(f"**[{n.get('title','Link')}]({n.get('link','#')})**")
-            st.caption(n.get('publisher', 'Source'))
-            st.markdown("---")
+    # 2. STOCK VIEW (FRONTPAGE STYLE)
+    with main_tab2:
+        data = get_stock_data_pro(st.session_state.ticker)
+        if not data: st.error("Loading data..."); return
+
+        # Header
+        clr = "#2EBD85" if data['change'] >= 0 else "#F6465D"
+        st.markdown(f"## {data['name']}")
+        st.markdown(f"<span style='font-size:32px; font-weight:bold'>₹{data['price']:,.2f}</span> <span style='color:{clr}; font-size:18px'>{data['change']:+.2f} ({data['pct']:+.2f}%)</span>", unsafe_allow_html=True)
+
+        # Stock Tabs
+        st_t1, st_t2, st_t3, st_t4 = st.tabs(["Posts", "Updates", "Data", "Reports"])
+
+        with st_t1: # POSTS
+            st.markdown(f"""
+            <div class="post-card">
+                <div class="post-header"><div class="user-avatar">AR</div><div class="user-name">aartirahulpal <span style="color:#888;font-weight:400">Dec 30</span></div></div>
+                <div class="post-content"><span class="post-tag">#{st.session_state.ticker}</span> Option (Intraday Learning Trade). Buying 1550 CE at 32. Target 38. Stoploss 28.</div>
+            </div>
+            <div class="post-card">
+                <div class="post-header"><div class="user-avatar">SB</div><div class="user-name">StockBets <span style="color:#888;font-weight:400">Dec 25</span></div></div>
+                <div class="post-content">Bearish view on <span class="post-tag">#{st.session_state.ticker}</span>. Resistance at {data['day_high']:.0f}. Watch out for reversal.</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with st_t2: # UPDATES
+            st.markdown(f"""
+            <div class="post-card">
+                <div class="post-header"><div class="user-avatar" style="background:#2962ff">CA</div><div class="user-name">corpannouncement</div></div>
+                <div class="post-content"><b>{st.session_state.ticker} Tax Penalty:</b> Company fined Rs. 1.11 Crore due to alleged incorrect input tax credit claims. Plans to appeal.</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with st_t3: # DATA
+            st.markdown("#### Price Summary")
+            # Day Range
+            rng_pct = ((data['price'] - data['day_low']) / (data['day_high'] - data['day_low'] + 0.01)) * 100
+            st.markdown(f"""
+            <div class="price-range-card">
+                <div class="range-header"><span>Today's Low</span><span>Today's High</span></div>
+                <div class="range-values"><span>₹{data['day_low']:,.2f}</span><span>₹{data['day_high']:,.2f}</span></div>
+                <div class="range-track"><div class="range-fill" style="width:{rng_pct}%"></div><div class="range-thumb" style="left:{rng_pct}%"></div></div>
+                
+                <div style="margin-top:20px;"></div>
+                <div class="range-header"><span>52 Week Low</span><span>52 Week High</span></div>
+                <div class="range-values"><span>₹{data['year_low']:,.2f}</span><span>₹{data['year_high']:,.2f}</span></div>
+                <div class="range-track"><div class="range-fill" style="width:50%"></div><div class="range-thumb" style="left:50%"></div></div>
+
+                <div style="display:flex; justify-content:space-between; margin-top:20px; border-top:1px solid #2a2e39; padding-top:10px;">
+                    <div><div class="range-header">Open</div><div class="range-values" style="font-size:14px">₹{data['open']:,.2f}</div></div>
+                    <div><div class="range-header">Prev Close</div><div class="range-values" style="font-size:14px">₹{data['prev']:,.2f}</div></div>
+                    <div><div class="range-header">Volume</div><div class="range-values" style="font-size:14px">{data['vol']:,}</div></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("#### Technical Summary")
+            st.markdown(f"""
+            <div class="tech-grid">
+                <div><div class="tech-item-lbl">DMA(12)</div><div class="tech-item-val">₹{data['dma']['12']:,.2f}</div></div>
+                <div><div class="tech-item-lbl">DMA(50)</div><div class="tech-item-val">₹{data['dma']['50']:,.2f}</div></div>
+                <div><div class="tech-item-lbl">DMA(100)</div><div class="tech-item-val">₹{data['dma']['100']:,.2f}</div></div>
+                <div><div class="tech-item-lbl">DMA(200)</div><div class="tech-item-val">₹{data['dma']['200']:,.2f}</div></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with st_t4: # REPORTS
+            reports = ["Concall Q2FY26 Summary", "Concall Q4FY25 Summary", "Concall Q3FY25 Summary", "Concall Q2FY25 Summary"]
+            for r in reports:
+                st.markdown(f"""
+                <div class="report-row">
+                    <div style="display:flex; align-items:center;"><span class="report-icon">📄</span> {r}</div>
+                    <div style="color:#888">></div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # --- TRADE ACTION PAD ---
+        st.markdown("---")
+        c_q, c_b, c_s = st.columns([1, 1, 1])
+        with c_q:
+            qty = st.number_input("Qty", 1, 10000, 10, label_visibility="collapsed")
+        with c_b:
+            if st.button("BUY", key="b_btn"):
+                cost = qty * data['price']
+                if bal >= cost:
+                    bal -= cost
+                    p = port.get(st.session_state.ticker, {'qty':0, 'avg':0})
+                    n_avg = ((p['qty']*p['avg']) + cost)/(p['qty']+qty)
+                    port[st.session_state.ticker] = {'qty': p['qty']+qty, 'avg': n_avg}
+                    save_data(st.session_state.user, bal, wl, port)
+                    st.success("Order Placed!"); time.sleep(0.5); st.rerun()
+                else: st.error("No Funds")
+        with c_s:
+            if st.button("SELL", key="s_btn"):
+                if st.session_state.ticker in port and port[st.session_state.ticker]['qty'] >= qty:
+                    bal += qty * data['price']
+                    port[st.session_state.ticker]['qty'] -= qty
+                    if port[st.session_state.ticker]['qty'] == 0: del port[st.session_state.ticker]
+                    save_data(st.session_state.user, bal, wl, port)
+                    st.success("Order Placed!"); time.sleep(0.5); st.rerun()
+                else: st.error("Invalid")
 
 # --- 6. ROUTER ---
 if 'page' not in st.session_state: st.session_state.page = "welcome"
